@@ -2,7 +2,7 @@
 // restituzione, variazione quantità), programmati, conferma "Da confermare". Bozza nello stato del modulo.
 
 import { el, sheet, field, input, textarea, select, chips, segmented, toggle, stepper, toast, icon, clear, preserveFocus, button, confirmDialog, attempt } from '../ui.js';
-import { parseEuroInput, parseQtyInput, formatEuro, formatEuroPlain, formatQtyPlain, formatQty, tradeEuroCents } from '../money.js';
+import { parseEuroInput, parseQtyInput, formatEuro, formatEuroSigned, formatEuroPlain, formatQtyPlain, formatQty, tradeEuroCents } from '../money.js';
 import { ValidationError } from '../errors.js';
 import { extractPdfLines, PdfReadError } from '../pdf-text.js';
 import { parsePayslipLines } from '../payslip.js';
@@ -10,6 +10,7 @@ import { openSetAsideSheet } from './metti-da-parte.js';
 import { formatDateIt, monthOf } from '../dates.js';
 import { FREQ_LABELS } from '../recurrence.js';
 import * as C from '../calc.js';
+import { budgetPeriod } from '../period.js';
 
 const TYPE_TITLES = {
   uscita: 'Uscita', entrata: 'Entrata', trasferimento: 'Trasferimento',
@@ -64,6 +65,9 @@ const psFrom = (ps) => {
   if (ps) for (const k of Object.keys(out)) out[k] = ps[k] === null || ps[k] === undefined ? '' : formatEuroPlain(ps[k]);
   return out;
 };
+// Spesa divisa (v4): righe Nome + Quota della bozza.
+const MAX_PEOPLE = 20;
+const peopleFrom = (split) => (split && split.length ? split.map((x) => ({ name: x.person, amountText: formatEuroPlain(x.amount) })) : []);
 const isSalaryCat = (state, id) => state.categories.find((c) => c.id === id)?.role === 'stipendio';
 
 // Con salaryFirst la categoria con ruolo Stipendio è la prima chip delle entrate.
@@ -79,9 +83,12 @@ function amountInput(id, value, onInput, placeholder = '0,00') {
   return input({ id, value, inputmode: 'decimal', placeholder, cls: 'input--amount', onInput });
 }
 
-function budgetWarning(store, mov) {
+// Avviso budget sul periodo di budget della data della spesa (mese di calendario o dallo stipendio, v4).
+function budgetWarning(ctx, mov) {
   if (mov.type !== 'uscita') return;
-  const st = C.budgetStatus(store.getState(), monthOf(mov.date)).find((b) => b.category.id === mov.categoryId);
+  const state = ctx.store.getState();
+  const period = budgetPeriod(state, mov.date, ctx.prefs?.get().budgetPeriod);
+  const st = C.budgetStatus(state, period).find((b) => b.category.id === mov.categoryId);
   if (st && st.over) toast(`Budget ${st.category.name} superato: ${formatEuro(st.spent)} su ${formatEuro(st.budget)}`, { error: true, duration: 5000 });
 }
 
@@ -114,8 +121,13 @@ export async function writeOffCredit(ctx, expense) {
   });
   if (!ok) return;
   const prevExcluded = m.excluded;
-  if (attempt(() => store.updateMovement(m.id, { excluded: refunded }))) {
-    toast(`${formatEuro(missing)} tornano a contare come spesa`, { undo: () => store.updateMovement(m.id, { excluded: prevExcluded }) });
+  const prevSplit = m.split || null;
+  // Spesa divisa (v4): la quota di ogni persona scende a quanto ha già restituito (chi non ha restituito nulla esce).
+  const patch = prevSplit && prevSplit.length
+    ? { split: C.personShares(store.getState(), m).filter((x) => x.person && x.refunded > 0).map((x) => ({ person: x.person, amount: Math.min(x.share, x.refunded) })), excluded: refunded }
+    : { excluded: refunded };
+  if (attempt(() => store.updateMovement(m.id, patch))) {
+    toast(`${formatEuro(missing)} tornano a contare come spesa`, { undo: () => store.updateMovement(m.id, { excluded: prevExcluded, split: prevSplit }) });
   }
 }
 
@@ -126,6 +138,8 @@ export async function writeOffCredit(ctx, expense) {
 export function openMovementForm(ctx, opts = {}) {
   // Compra/Vendi crypto hanno il loro foglio (quantità × prezzo).
   if (opts.movement && C.isTrade(opts.movement)) return openTradeForm(ctx, { movement: opts.movement });
+  // Interessi e rettifiche del deposito (v4) sono calcolati dall'app: sola lettura, nessun Elimina.
+  if (opts.movement && (opts.movement.interest || opts.movement.align)) return openDerivedSheet(ctx, opts.movement);
   const { store } = ctx;
   const editing = opts.movement || null;
   const confirming = opts.confirm || null;
@@ -143,6 +157,7 @@ export function openMovementForm(ctx, opts = {}) {
         amountToText: m.amountTo ? plainFor(to, m.amountTo) : '', description: m.description || '', note: m.note || '',
         excludeOn: !!m.excluded, excludedText: m.excluded ? formatEuroPlain(m.excluded) : '',
         grossText: m.gross ? formatEuroPlain(m.gross) : '', ps: psFrom(m.payslip), pdf: null, refundOf: m.refundOf || null,
+        excludeMode: m.split && m.split.length ? 'people' : 'one', people: peopleFrom(m.split), person: m.person || null,
       };
     }
     if (confirming) {
@@ -154,6 +169,7 @@ export function openMovementForm(ctx, opts = {}) {
         // L'importo è quello scritto dall'utente nel programmato (non un suggerimento dell'app).
         amountText: plainFor(a, s.amount), sign: 1, amountToText: s.amountTo ? plainFor(to, s.amountTo) : '',
         description: s.description || '', note: '', excludeOn: false, excludedText: '', grossText: '', ps: emptyPs(), pdf: null, refundOf: null,
+        excludeMode: 'one', people: [], person: null,
       };
     }
     const p = opts.preset || {};
@@ -162,6 +178,7 @@ export function openMovementForm(ctx, opts = {}) {
       type, date: p.date || today, accountId: p.accountId || defaultAccount(state0, type), toAccountId: p.toAccountId || '',
       categoryId: p.categoryId || '', amountText: '', sign: p.sign || 1, amountToText: '', description: p.description || '', note: '',
       excludeOn: false, excludedText: '', grossText: '', ps: emptyPs(), pdf: null, refundOf: p.refundOf || null,
+      excludeMode: 'one', people: [], person: p.person || null,
     };
   })();
 
@@ -190,7 +207,7 @@ export function openMovementForm(ctx, opts = {}) {
         out.push(el('div', { class: 'recents' }, rec.map((t, i) => el('button', {
           type: 'button', class: 'recent', id: 'recent-' + i,
           on: { click: () => { Object.assign(d, { type: t.type, accountId: t.accountId, toAccountId: t.toAccountId || '', categoryId: t.categoryId || '', description: t.description }); draw(); focusAmount(); } },
-        }, el('span', { class: 'recent__icon', vars: { '--c': t.type === 'trasferimento' ? (acc(state, t.accountId)?.color || C.NEUTRAL_COLOR) : C.categoryColor(state, t.categoryId) } }, icon(t.type === 'trasferimento' ? 'transfer' : t.type === 'entrata' ? 'down' : 'tag')),
+        }, el('span', { class: 'recent__icon', vars: { '--c': t.type === 'trasferimento' ? (acc(state, t.accountId)?.color || C.NEUTRAL_COLOR) : C.categoryColor(state, t.categoryId) } }, icon(t.type === 'trasferimento' ? 'transfer' : C.categoryIcon(state, t.categoryId))),
         el('span', { text: C.templateLabel(state, t) })))));
       }
     }
@@ -227,6 +244,16 @@ export function openMovementForm(ctx, opts = {}) {
           el('p', { class: 'row__title', text: `${exp.description || C.categoryLabel(state, exp.categoryId)} · ${formatDateIt(exp.date)}` }),
           el('p', { class: 'hero__sub', text: `Quota esclusa ${formatEuro(exp.excluded)} · da ricevere ${formatEuro(Math.max(0, residual))}` }),
           exp.deleted ? el('p', { class: 'hero__sub is-danger', text: 'La spesa è stata eliminata' }) : null));
+        // Spesa divisa: chi restituisce (chip con i nomi della spesa; "Senza nome" per la parte senza persona).
+        const shares = exp.split && exp.split.length ? C.personShares(state, exp) : null;
+        if (shares) {
+          if (d.person === null && !editing) d.person = shares.find((x) => x.person && x.residual > 0)?.person ?? null;
+          const opts = shares.filter((x) => x.residual > 0 || (editing && (x.person || null) === (editing.person || null)))
+            .map((x, i) => ({ value: x.person, label: x.person || 'Senza nome', id: 'f-person-chip-' + i }));
+          out.push(el('p', { class: 'field__label', text: 'Chi restituisce' }));
+          out.push(el('div', { class: 'form-group', dataset: { field: 'person' } },
+            el('div', { class: 'field' }, chips(opts, d.person, (v) => { d.person = v; draw(); }, { wrap: true, label: 'Chi restituisce' }), el('p', { class: 'field__error', hidden: true }))));
+        }
       }
     }
 
@@ -238,7 +265,13 @@ export function openMovementForm(ctx, opts = {}) {
     const amountLabel = d.type === 'trasferimento' ? 'Importo inviato' : isCrypto(a) ? 'Quantità' : salary ? 'Netto a pagare' : 'Importo';
     const amountHint = d.type === 'restituzione' ? (() => {
       const exp = state.movements.find((m) => m.id === d.refundOf);
-      return exp ? `Da ricevere: ${formatEuro(Math.max(0, C.residualOf(state, exp) + (editing ? editing.amount : 0)))}` : null;
+      if (!exp) return null;
+      const own = editing && (editing.person || null) === (d.person || null) ? editing.amount : 0;
+      if (exp.split && exp.split.length) {
+        const sh = C.personShares(state, exp).find((x) => (x.person || null) === (d.person || null));
+        return `Da ricevere da ${d.person || 'Senza nome'}: ${formatEuro(Math.max(0, (sh ? sh.share - sh.refunded : 0) + own))}`;
+      }
+      return `Da ricevere: ${formatEuro(Math.max(0, C.residualOf(state, exp) + (editing ? editing.amount : 0)))}`;
     })() : isCrypto(a) ? `In ${a.asset}, fino a 8 decimali` : null;
     out.push(el('div', { class: 'form-group' },
       field({ label: amountLabel + (isCrypto(a) ? ` (${a.asset})` : ' (€)'), field: 'amount', id: 'f-amount', hint: amountHint,
@@ -284,15 +317,21 @@ export function openMovementForm(ctx, opts = {}) {
         el('label', { class: 'field__label', text: 'Escludi una quota', attrs: { for: 'f-exclude' } }),
         toggle({ id: 'f-exclude', checked: d.excludeOn, label: 'Escludi una quota', onChange: (v) => { d.excludeOn = v; draw(); if (v) document.getElementById('f-excluded')?.focus(); } }))];
       if (d.excludeOn) {
+        group.push(el('div', { class: 'field' }, segmented([
+          { value: 'one', label: 'Una quota', id: 'ex-one' }, { value: 'people', label: 'Più persone', id: 'ex-people' },
+        ], d.excludeMode, (v) => { d.excludeMode = v; if (v === 'people' && !d.people.length) d.people = [{ name: '', amountText: '' }]; draw(); }, { label: 'Quota da escludere' })));
+      }
+      if (d.excludeOn && d.excludeMode === 'one') {
         group.push(field({ label: 'Quota da ricevere (€)', field: 'excluded', id: 'f-excluded',
           hint: amount && ex !== null ? `Il conto scende di ${formatEuro(amount)}; statistiche e budget contano ${formatEuro(Math.max(0, amount - ex))}. ${formatEuro(ex)} restano "Da ricevere".` : 'Esempio: hai pagato 40 € e 20 € sono di un amico. Il conto scende di 40 €, le statistiche contano 20 €.',
           input: input({ id: 'f-excluded', value: d.excludedText, inputmode: 'decimal', placeholder: '0,00', onInput: (v) => { d.excludedText = v; } }) }));
       }
+      if (d.excludeOn && d.excludeMode === 'people') group.push(peopleBlock(state));
       out.push(el('div', { class: 'form-group' }, group));
       if (editing && editing.excluded) {
         const refunds = C.refundsOf(state, editing.id);
         const residual = C.residualOf(state, editing);
-        const rows = refunds.map((r) => el('div', { class: 'kv' }, el('span', { text: `Restituzione ${formatDateIt(r.date)}` }), el('span', { class: 'is-income', text: formatEuro(r.amount) })));
+        const rows = refunds.map((r) => el('div', { class: 'kv' }, el('span', { text: `Restituzione ${formatDateIt(r.date)}${r.person ? ' · ' + r.person : ''}` }), el('span', { class: 'is-income', text: formatEuro(r.amount) })));
         out.push(el('div', { class: 'card' },
           el('div', { class: 'card__head' }, el('h2', { class: 'card__title', text: 'Da ricevere' })),
           ...rows,
@@ -324,6 +363,34 @@ export function openMovementForm(ctx, opts = {}) {
     return out;
   }
 
+  // Più persone: righe Nome + Quota (€), nessun importo precompilato (D4); nomi già usati suggeriti con <datalist>.
+  function peopleBlock(state) {
+    const hintText = () => {
+      const tot = d.people.reduce((t, p) => t + (parseEuroInput(p.amountText) || 0), 0);
+      const a = parseEuroInput(d.amountText);
+      return a && tot ? `Il conto scende di ${formatEuro(a)}; statistiche e budget contano ${formatEuro(Math.max(0, a - tot))}. ${formatEuro(tot)} restano "Da ricevere".`
+        : 'Scrivi il nome e la quota di ciascuno: la tua parte è quella che resta.';
+    };
+    const refreshHint = () => { const h = document.getElementById('f-people-hint'); if (h) h.textContent = hintText(); };
+    const rows = d.people.map((p, i) => el('div', { class: 'field person-row', dataset: { field: 'split-' + i } },
+      el('div', { class: 'person-row__fields' },
+        el('label', { class: 'sr-only', text: `Nome della persona ${i + 1}`, attrs: { for: 'f-person-' + i } }),
+        input({ id: 'f-person-' + i, value: p.name, maxlength: 40, placeholder: 'Nome', attrs: { list: 'f-people-list', autocapitalize: 'words' }, onInput: (v) => { p.name = v; } }),
+        el('label', { class: 'sr-only', text: `Quota di ${p.name || 'questa persona'} (€)`, attrs: { for: 'f-share-' + i } }),
+        input({ id: 'f-share-' + i, value: p.amountText, inputmode: 'decimal', placeholder: 'Quota €', cls: 'person-row__amount', onInput: (v) => { p.amountText = v; refreshHint(); } }),
+        el('button', { type: 'button', class: 'icon-btn', id: 'f-person-del-' + i, attrs: { 'aria-label': `Togli ${p.name || 'persona ' + (i + 1)}` },
+          on: { click: () => { d.people.splice(i, 1); if (!d.people.length) d.people.push({ name: '', amountText: '' }); draw(); } } }, icon('trash'))),
+      el('p', { class: 'field__error', hidden: true, attrs: { 'aria-live': 'polite' } })));
+    // L'errore dell'intero elenco sta prima delle righe: showFormError usa il primo .field__error del contenitore.
+    return el('div', { class: 'field people', dataset: { field: 'split' } },
+      el('p', { class: 'field__label', text: 'Persone e quote' }),
+      el('p', { class: 'field__error', hidden: true, attrs: { 'aria-live': 'polite' } }),
+      ...rows,
+      d.people.length < MAX_PEOPLE ? button('Aggiungi persona', () => { d.people.push({ name: '', amountText: '' }); draw(); setTimeout(() => document.getElementById('f-person-' + (d.people.length - 1))?.focus(), 0); }, { kind: 'plain', small: true, icon: 'plus', id: 'f-person-add' }) : null,
+      el('p', { class: 'field__hint', id: 'f-people-hint', text: hintText() }),
+      el('datalist', { id: 'f-people-list' }, C.knownPeople(state).map((n) => el('option', { value: n }))));
+  }
+
   function payslipBlock() {
     const net = parseEuroInput(d.amountText);
     const gross = parseEuroInput(d.grossText);
@@ -334,6 +401,7 @@ export function openMovementForm(ctx, opts = {}) {
     else if (d.pdf?.ok) {
       pdfBox.push(el('div', { class: 'callout callout--ok' }, icon('check'), el('div', {},
         el('p', { class: 'callout__title', text: d.pdf.ok }),
+        d.pdf.netComputed ? el('p', { text: 'Netto calcolato come Totale competenze − Totale ritenute: controllalo sulla busta.' }) : null,
         d.pdf.missing.length ? el('p', { text: `Non trovati: ${d.pdf.missing.join(', ')}. Compilali a mano se servono.` }) : null,
         d.pdf.monthNote ? el('p', { text: d.pdf.monthNote }) : null)));
     }
@@ -374,7 +442,7 @@ export function openMovementForm(ctx, opts = {}) {
           const ym = `${r.year}-${String(r.month).padStart(2, '0')}`;
           if (ym !== monthOf(d.date || today)) monthNote = `La busta è di ${String(r.month).padStart(2, '0')}/${r.year}: la data dell'entrata decide il mese (provvisorio).`;
         }
-        d.pdf = { ok: `Letti ${r.found.length} campi: controlla i valori e premi Salva.`, missing: r.missing.map((k) => PDF_LABELS[k]), monthNote };
+        d.pdf = { ok: `Letti ${r.found.length} campi: controlla i valori e premi Salva.`, missing: r.missing.map((k) => PDF_LABELS[k]), monthNote, netComputed: r.netComputed };
       }
     } catch (e) {
       d.pdf = { error: e instanceof PdfReadError ? e.message : 'Non riesco a leggere questo PDF: compila i campi a mano.' };
@@ -399,7 +467,18 @@ export function openMovementForm(ctx, opts = {}) {
     }
     if (d.type === 'uscita') {
       let ex = 0;
-      if (d.excludeOn && d.excludedText.trim()) {
+      input.split = null;
+      if (d.excludeOn && d.excludeMode === 'people') {
+        const people = d.people.filter((p) => p.name.trim() || p.amountText.trim());
+        input.split = people.map((p) => {
+          const at = d.people.indexOf(p);
+          if (!p.name.trim()) throw new ValidationError('Inserisci il nome', 'split-' + at);
+          const v = parseEuroInput(p.amountText);
+          if (!v) throw new ValidationError(p.amountText.trim() ? 'Quota non valida (es. 30,00)' : 'Inserisci la quota', 'split-' + at);
+          return { person: p.name, amount: v };
+        });
+        if (!input.split.length) input.split = null;
+      } else if (d.excludeOn && d.excludedText.trim()) {
         ex = parseEuroInput(d.excludedText);
         if (ex === null) throw new ValidationError('Quota non valida (es. 20,00)', 'excluded');
       }
@@ -433,7 +512,7 @@ export function openMovementForm(ctx, opts = {}) {
         input.amountTo = v;
       } else input.amountTo = null;
     }
-    if (d.type === 'restituzione') input.refundOf = d.refundOf;
+    if (d.type === 'restituzione') { input.refundOf = d.refundOf; input.person = d.person; }
     return input;
   }
 
@@ -446,7 +525,7 @@ export function openMovementForm(ctx, opts = {}) {
       else if (confirming) mov = store.confirmOccurrence(confirming.sched.id, confirming.date, { ...inp });
       else mov = store.addMovement(inp);
       toast(editing ? 'Modifiche salvate' : confirming ? 'Pagamento confermato' : 'Movimento salvato');
-      budgetWarning(store, mov);
+      budgetWarning(ctx, mov);
       // Nuovo stipendio (anche da un programmato): foglio "Metti da parte" se ci sono obiettivi attivi.
       if (!editing && mov.type === 'entrata' && isSalaryCat(store.getState(), mov.categoryId) && C.activeGoals(store.getState()).length) {
         setTimeout(() => openSetAsideSheet(ctx, { date: mov.date }), 0);
@@ -591,6 +670,22 @@ export function openTradeForm(ctx, { side = 'compra', cryptoAccountId = null, mo
   return api;
 }
 
+function openDerivedSheet(ctx, m) {
+  const state = ctx.store.getState();
+  const kv = (k, v, cls) => el('div', { class: 'kv' }, el('span', { text: k }), el('span', { class: cls, text: v }));
+  return sheet({
+    title: m.interest ? 'Interessi' : 'Rettifica saldo',
+    content: (s) => s.body.append(el('div', { class: 'card', id: 'derived-card' },
+      kv('Importo', formatEuroSigned(m.amount), m.amount > 0 ? 'is-income' : ''),
+      kv('Conto', C.accountLabel(state, m.accountId)),
+      kv(m.interest ? 'Maturati fino al' : 'Data', formatDateIt(m.date)),
+      m.align ? kv('Saldo scritto', formatEuro(m.align.balance)) : null,
+      m.description ? kv('Descrizione', m.description) : null),
+      el('p', { class: 'section-footer', id: 'derived-note', text: 'Calcolato in automatico. Per correggerlo usa Allinea al saldo reale nel conto.' }),
+      el('div', { class: 'btn-row' }, button('Apri il conto', () => { s.close(); ctx.go(`conti/${m.accountId}`); }, { small: true, icon: 'chevron', id: 'derived-account' }))),
+  });
+}
+
 export function skipWithUndo(ctx, sched, date) {
   if (attempt(() => { ctx.store.skipOccurrence(sched.id, date); return true; })) {
     toast(`Saltato: ${sched.description || 'pagamento'} del ${formatDateIt(date)}`, { undo: () => ctx.store.unhandleOccurrence(sched.id, date) });
@@ -602,11 +697,12 @@ export function openConfirmForm(ctx, sched, date) {
 }
 
 // Restituzione collegata a una spesa: importo vuoto, conto della spesa se ancora valido.
-export function openRefundForm(ctx, expense) {
+// Su una spesa divisa `person` sceglie subito chi restituisce (altrimenti la prima persona con un residuo).
+export function openRefundForm(ctx, expense, { person = null } = {}) {
   const state = ctx.store.getState();
   const a = acc(state, expense.accountId);
   const accountId = a && !a.deleted && a.kind === 'eur' ? a.id : defaultAccount(state, 'restituzione');
-  return openMovementForm(ctx, { preset: { type: 'restituzione', refundOf: expense.id, accountId } });
+  return openMovementForm(ctx, { preset: { type: 'restituzione', refundOf: expense.id, accountId, person } });
 }
 
 // ---- Pagamenti programmati ----

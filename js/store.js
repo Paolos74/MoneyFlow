@@ -4,6 +4,7 @@
 import { ValidationError, StorageError } from './errors.js';
 import { isValidISO, monthOf } from './dates.js';
 import { formatEuro } from './money.js';
+import { PICK_ICONS } from './icons.js';
 
 export { ValidationError, StorageError };
 
@@ -34,7 +35,12 @@ const DEFAULT_CATEGORIES = [
   ['uscita', 'Abbonamenti', 4], ['uscita', 'Salute', 3], ['uscita', 'Svago', 5], ['uscita', 'Ristoranti', 8],
   ['uscita', 'Regali', 6], ['uscita', 'Altro', 11],
   ['entrata', 'Stipendio', 0], ['entrata', 'Rimborsi', 6], ['entrata', 'Altro', 11],
+  ['entrata', 'Interessi', 0],
 ];
+
+// Categoria delle entrate "Interessi" dei conti deposito (v4): id fisso, creata da upsertDerived se manca.
+export const INTEREST_CATEGORY_ID = 'default-entrata-interessi';
+const DEFAULT_ROLES = { Stipendio: 'stipendio', Interessi: 'interessi' };
 
 export function emptyData() {
   return { app: APP, schemaVersion: SCHEMA_VERSION, accounts: [], categories: [], movements: [], scheduled: [], goals: [] };
@@ -48,7 +54,7 @@ export function defaultData() {
     data.categories.push({
       id: `default-${type}-${name.toLocaleLowerCase('it')}`, createdAt: 0, updatedAt: 0, deleted: false,
       name, type, color: PALETTE[color], budget: null,
-      role: type === 'entrata' && name === 'Stipendio' ? 'stipendio' : null, order: i,
+      role: (type === 'entrata' && DEFAULT_ROLES[name]) || null, order: i,
     });
   });
   return data;
@@ -139,6 +145,54 @@ function cleanGoalLog(v) {
   return out;
 }
 
+// Icona scelta per conti e categorie (v4): un nome di PICK_ICONS; un nome sconosciuto diventa null.
+const cleanIcon = (v) => (typeof v === 'string' && PICK_ICONS.includes(v) ? v : null);
+
+// Conto deposito senza vincoli (v4): data di inizio, ritenuta e tassi annui lordi per data, in punti base.
+function cleanDeposit(v, kind) {
+  if (v === null || v === undefined) return null;
+  if (kind !== 'eur') fail('Il deposito vale solo per i conti in euro', 'deposit');
+  if (!isObj(v)) fail('Deposito non valido', 'deposit');
+  const start = cleanDate(v.start, 'deposit-start', 'Data di inizio');
+  const wb = v.withholdingBp ?? 2600;
+  if (!Number.isSafeInteger(wb) || wb < 0 || wb > 10000) fail('Ritenuta: da 0 a 100 %', 'deposit-withholding');
+  if (!Array.isArray(v.rates) || !v.rates.length) fail('Inserisci il tasso annuo', 'deposit-rate');
+  const rates = v.rates.map((r) => {
+    if (!isObj(r)) fail('Tasso non valido', 'deposit-rate');
+    const from = cleanDate(r.from, 'deposit-rate', 'Data del tasso');
+    if (!Number.isSafeInteger(r.rateBp) || r.rateBp < 1 || r.rateBp > 2000) fail('Tasso annuo: da 0,01 a 20 %', 'deposit-rate');
+    return { from, rateBp: r.rateBp };
+  }).sort((a, b) => a.from.localeCompare(b.from));
+  if (rates[0].from !== start) fail('Il primo tasso deve partire dalla data di inizio', 'deposit-rate');
+  if (rates.some((r, i) => i > 0 && r.from === rates[i - 1].from)) fail('Due tassi con la stessa data', 'deposit-rate');
+  return { start, withholdingBp: wb, rates };
+}
+
+// Nome di una persona (spesa divisa, restituzione): 1–40 caratteri.
+function cleanPerson(v, field) {
+  const p = typeof v === 'string' ? v.trim().replace(/\s+/g, ' ') : '';
+  if (p.length < 1) fail('Inserisci il nome', field);
+  if (p.length > 40) fail('Il nome può avere al massimo 40 caratteri', field);
+  return p;
+}
+
+// Spesa divisa tra più persone (v4): [{ person, amount }], al massimo 20, nomi unici senza maiuscole. null se vuota.
+function cleanSplit(v) {
+  if (v === null || v === undefined) return null;
+  if (!Array.isArray(v)) fail('Persone non valide', 'split');
+  if (!v.length) return null;
+  if (v.length > 20) fail('Al massimo 20 persone', 'split');
+  const seen = new Set();
+  return v.map((it, i) => {
+    if (!isObj(it)) fail('Persone non valide', 'split');
+    const person = cleanPerson(it.person, 'split-' + i);
+    const k = lower(person);
+    if (seen.has(k)) fail(`${person} compare due volte`, 'split-' + i);
+    seen.add(k);
+    return { person, amount: cleanInt(it.amount, 'split-' + i, { min: 1, label: 'Quota' }) };
+  });
+}
+
 const unitOf = (acc) => (acc ? (acc.kind === 'crypto' ? 'crypto:' + acc.asset : 'eur') : null);
 
 // Totale restituito per una spesa, escludendo eventualmente una restituzione.
@@ -150,6 +204,20 @@ function refundedTotal(state, expenseId, exceptId) {
   return t;
 }
 
+// Restituito da una persona (nome senza maiuscole; null = restituzioni senza nome).
+function refundedBy(state, expenseId, person, exceptId) {
+  const k = person === null ? null : lower(person);
+  let t = 0;
+  for (const m of state.movements) {
+    if (m.deleted || m.type !== 'restituzione' || m.refundOf !== expenseId || m.id === exceptId) continue;
+    const mk = m.person ? lower(m.person) : null;
+    if (mk === k) t += m.amount;
+  }
+  return t;
+}
+
+const splitSum = (split) => (split || []).reduce((t, x) => t + x.amount, 0);
+
 const VALIDATORS = {
   account(input, prev, state) {
     const kind = input.kind === 'crypto' ? 'crypto' : input.kind === 'eur' ? 'eur' : fail('Scegli il tipo di conto', 'kind');
@@ -160,6 +228,8 @@ const VALIDATORS = {
       initial: cleanInt(input.initial ?? 0, 'initial', { label: 'Saldo iniziale' }),
       color: cleanColor(input.color),
       order: Number.isSafeInteger(input.order) ? input.order : 0,
+      icon: cleanIcon(input.icon),
+      deposit: cleanDeposit(input.deposit, kind),
     };
     if (kind === 'crypto') {
       const a = typeof input.asset === 'string' ? input.asset.trim().toUpperCase() : '';
@@ -182,8 +252,9 @@ const VALIDATORS = {
       type,
       color: cleanColor(input.color),
       budget: null,
-      role: input.role === 'stipendio' ? 'stipendio' : null,
+      role: input.role === 'stipendio' || input.role === 'interessi' ? input.role : null,
       order: Number.isSafeInteger(input.order) ? input.order : 0,
+      icon: cleanIcon(input.icon),
     };
     if (input.budget !== null && input.budget !== undefined) {
       if (type !== 'uscita') fail('Il budget vale solo per le categorie di uscita', 'budget');
@@ -203,11 +274,13 @@ const VALIDATORS = {
       type = input.type;
     }
     if (!MOVEMENT_TYPES.includes(type)) fail('Tipo di movimento non valido', 'type');
+    // Rettifica "Allinea al saldo reale" (v4): variazione su un conto deposito, scritta solo dal motore degli interessi.
+    const align = type === 'variazione' && isObj(input.align) && Number.isSafeInteger(input.align.balance) ? { balance: input.align.balance } : null;
     const rec = {
       type,
       date: cleanDate(input.date, 'date'),
       amount: type === 'variazione'
-        ? cleanInt(input.amount, 'amount', { nonZero: true, label: 'Quantità' })
+        ? cleanInt(input.amount, 'amount', { nonZero: !align, label: 'Quantità' })
         : cleanInt(input.amount, 'amount', { min: 1 }),
       accountId: null, toAccountId: null, amountTo: null, categoryId: null,
       description: cleanText(input.description, 80, 'description', 'Descrizione'),
@@ -216,13 +289,22 @@ const VALIDATORS = {
       trade: null, price: null, payslip: null,
       scheduledId: typeof input.scheduledId === 'string' ? input.scheduledId : null,
       occurrence: isValidISO(input.occurrence) ? input.occurrence : null,
+      split: null, person: null, interest: null, align: null, importKey: null,
     };
     const acc = checkRef(state.accounts, input.accountId, prev?.accountId, 'accountId', 'un conto');
     rec.accountId = input.accountId;
     if (acc && ['uscita', 'entrata', 'restituzione'].includes(type) && acc.kind !== 'eur') {
       fail('Uscite, entrate e restituzioni si registrano solo su conti in euro', 'accountId');
     }
-    if (acc && type === 'variazione' && acc.kind !== 'crypto') fail('La variazione di quantità vale solo per i conti crypto', 'accountId');
+    if (acc && type === 'variazione' && acc.kind !== 'crypto' && !align) fail('La variazione di quantità vale solo per i conti crypto', 'accountId');
+    if (align && acc && acc.kind === 'eur') rec.align = align;
+    if ((type === 'uscita' || type === 'entrata') && input.importKey !== null && input.importKey !== undefined && input.importKey !== '') {
+      if (typeof input.importKey !== 'string' || input.importKey.length > 120) fail('Chiave di importazione non valida', 'importKey');
+      rec.importKey = input.importKey;
+    }
+    if (type === 'entrata' && isObj(input.interest) && typeof input.interest.accountId === 'string' && /^\d{4}-\d{2}$/.test(input.interest.month)) {
+      rec.interest = { accountId: input.interest.accountId, month: input.interest.month };
+    }
 
     if (type === 'uscita' || type === 'entrata') {
       const cat = checkRef(state.categories, input.categoryId, prev?.categoryId, 'categoryId', 'una categoria');
@@ -230,10 +312,23 @@ const VALIDATORS = {
       rec.categoryId = input.categoryId;
     }
     if (type === 'uscita') {
-      rec.excluded = cleanInt(input.excluded ?? 0, 'excluded', { min: 0, label: 'Quota esclusa' });
-      if (rec.excluded > rec.amount) fail("La quota esclusa non può superare l'importo", 'excluded');
+      // Spesa divisa (v4): la quota esclusa è la somma delle quote delle persone.
+      rec.split = cleanSplit(input.split);
+      rec.excluded = rec.split ? splitSum(rec.split) : cleanInt(input.excluded ?? 0, 'excluded', { min: 0, label: 'Quota esclusa' });
+      if (rec.excluded > rec.amount) fail(rec.split ? "Le quote delle persone non possono superare l'importo" : "La quota esclusa non può superare l'importo", rec.split ? 'split' : 'excluded');
       const refunded = prev ? refundedTotal(state, prev.id) : 0;
-      if (rec.excluded < refunded) fail(`Sono già stati restituiti ${formatEuro(refunded)}: la quota esclusa non può essere minore`, 'excluded');
+      if (rec.split && prev) {
+        // Nessuna persona può scendere sotto quanto ha già restituito (anche chi viene tolto dall'elenco).
+        const names = new Map(rec.split.map((x, i) => [lower(x.person), i]));
+        for (const m of state.movements) {
+          if (m.deleted || m.type !== 'restituzione' || m.refundOf !== prev.id || !m.person) continue;
+          const i = names.get(lower(m.person));
+          const share = i === undefined ? 0 : rec.split[i].amount;
+          const by = refundedBy(state, prev.id, m.person);
+          if (by > share) fail(`${m.person} ha già restituito ${formatEuro(by)}: la sua quota non può essere minore`, i === undefined ? 'split' : 'split-' + i);
+        }
+      }
+      if (rec.excluded < refunded) fail(`Sono già stati restituiti ${formatEuro(refunded)}: la quota esclusa non può essere minore`, rec.split ? 'split' : 'excluded');
     }
     if (type === 'entrata' && input.gross !== null && input.gross !== undefined) {
       rec.gross = cleanInt(input.gross, 'gross', { min: 1, label: 'Competenze lorde' });
@@ -261,9 +356,22 @@ const VALIDATORS = {
         fail('La spesa collegata non esiste più', 'refundOf');
       }
       rec.refundOf = input.refundOf;
+      const named = typeof input.person === 'string' && input.person.trim() ? cleanPerson(input.person, 'person') : null;
+      const split = Array.isArray(exp.split) && exp.split.length ? exp.split : null;
+      if (named && split) {
+        const share = split.find((x) => lower(x.person) === lower(named));
+        if (!share) fail('Scegli una delle persone della spesa', 'person');
+        rec.person = share.person;
+      } else rec.person = named;
       if (!exp.deleted) {
         const residual = (exp.excluded || 0) - refundedTotal(state, exp.id, prev?.id);
         if (rec.amount > residual) fail(`Puoi registrare al massimo ${formatEuro(residual)}`, 'amount');
+        if (split) {
+          // Residuo della persona scelta, oppure della parte senza nome (quota esclusa − somma delle quote).
+          const share = rec.person ? split.find((x) => lower(x.person) === lower(rec.person)).amount : Math.max(0, exp.excluded - splitSum(split));
+          const left = share - refundedBy(state, exp.id, rec.person, prev?.id);
+          if (rec.amount > left) fail(`${rec.person ? rec.person + ': puoi' : 'Puoi'} registrare al massimo ${formatEuro(Math.max(0, left))}`, 'amount');
+        }
       }
     }
     return rec;
@@ -500,6 +608,101 @@ export function createStore({ storage, now = () => Date.now(), uuid = () => cryp
     return out;
   }
 
+  // Movimenti calcolati dall'app (interessi, rettifiche): id fissi decisi dal chiamante, un solo salvataggio.
+  // records: [{ id, input, deleted }]. Un record da eliminare che esiste viene solo marcato deleted (contenuto invariato);
+  // un record nuovo già eliminato si crea solo se valido (rettifiche con importo 0).
+  // Nessun salvataggio e nessuna notifica se nulla cambia: così chi lo chiama da subscribe non crea cicli.
+  function upsertDerived(records, { ensureCategory = false } = {}) {
+    const next = cloneState(state);
+    const keys = [];
+    const t = now();
+    if (ensureCategory) {
+      const i = next.categories.findIndex((c) => c.id === INTEREST_CATEGORY_ID);
+      if (i < 0) {
+        const clash = next.categories.some((c) => !c.deleted && c.type === 'entrata' && lower(c.name) === 'interessi');
+        next.categories.push({
+          id: INTEREST_CATEGORY_ID, createdAt: t, updatedAt: t, deleted: false, name: clash ? 'Interessi deposito' : 'Interessi',
+          type: 'entrata', color: PALETTE[0], budget: null, role: 'interessi', order: DEFAULT_CATEGORIES.length - 1, icon: null,
+        });
+        keys.push(`category_${INTEREST_CATEGORY_ID}`);
+      } else if (next.categories[i].deleted) {
+        next.categories[i] = { ...next.categories[i], deleted: false, updatedAt: stamp(next.categories[i]) };
+        keys.push(`category_${INTEREST_CATEGORY_ID}`);
+      }
+    }
+    for (const { id, input, deleted = false } of records) {
+      const i = next.movements.findIndex((m) => m.id === id);
+      const prev = i >= 0 ? next.movements[i] : null;
+      if (deleted && prev) {
+        if (prev.deleted) continue;
+        next.movements[i] = { ...prev, deleted: true, updatedAt: stamp(prev) };
+        keys.push(`movement_${id}`);
+        continue;
+      }
+      const clean = VALIDATORS.movement(input, prev, next);
+      if (prev) {
+        const same = !prev.deleted && Object.entries(clean).every(([k, v]) => JSON.stringify(prev[k] ?? null) === JSON.stringify(v ?? null));
+        if (same) continue;
+        next.movements[i] = { ...prev, ...clean, deleted: false, updatedAt: stamp(prev) };
+      } else {
+        next.movements.push({ id, createdAt: t, updatedAt: t, deleted, ...clean });
+      }
+      keys.push(`movement_${id}`);
+    }
+    if (!keys.length) return 0;
+    commit(next, keys);
+    return keys.length;
+  }
+
+  // Più movimenti nuovi in un salvataggio (importazione CSV): o tutti o nessuno.
+  function addMovements(inputs) {
+    const next = cloneState(state);
+    const t = now();
+    const out = inputs.map((input) => {
+      const rec = { id: uuid(), createdAt: t, updatedAt: t, deleted: false, ...VALIDATORS.movement(input || {}, null, next) };
+      next.movements.push(rec);
+      return rec;
+    });
+    if (!out.length) return out;
+    commit(next, out.map((m) => `movement_${m.id}`));
+    return out;
+  }
+
+  // Chiude il conto con una persona su tutte le spese divise aperte, in un salvataggio.
+  // refund: una restituzione per spesa con il residuo della persona; writeoff: la quota scende a quanto ha già
+  // restituito (se non ha restituito nulla la persona esce dall'elenco) e la quota esclusa di conseguenza.
+  function settlePerson(name, { mode, accountId, date } = {}) {
+    const k = lower(name || '');
+    if (!k) fail('Persona non trovata');
+    if (mode !== 'refund' && mode !== 'writeoff') fail('Operazione non valida');
+    const next = cloneState(state);
+    const keys = [];
+    const t = now();
+    for (const exp of state.movements) {
+      if (exp.deleted || exp.type !== 'uscita' || !Array.isArray(exp.split)) continue;
+      const share = exp.split.find((x) => lower(x.person) === k);
+      if (!share) continue;
+      const by = refundedBy(state, exp.id, share.person);
+      const residual = share.amount - by;
+      if (residual <= 0) continue;
+      if (mode === 'refund') {
+        const input = { type: 'restituzione', date, amount: residual, accountId, refundOf: exp.id, person: share.person };
+        const rec = { id: uuid(), createdAt: t, updatedAt: t, deleted: false, ...VALIDATORS.movement(input, null, next) };
+        next.movements.push(rec);
+        keys.push(`movement_${rec.id}`);
+      } else {
+        const split = exp.split.map((x) => (x === share ? { ...x, amount: by } : x)).filter((x) => x.amount > 0);
+        const i = next.movements.findIndex((m) => m.id === exp.id);
+        const clean = VALIDATORS.movement({ ...exp, split, excluded: splitSum(split) }, exp, next);
+        next.movements[i] = { ...exp, ...clean, updatedAt: stamp(exp) };
+        keys.push(`movement_${exp.id}`);
+      }
+    }
+    if (!keys.length) fail('Nessuna somma aperta con questa persona');
+    commit(next, keys);
+    return keys.length;
+  }
+
   const allKeys = () => Object.entries(KINDS).flatMap(([kind, c]) => state[c].map((r) => `${kind}_${r.id}`));
 
   function replaceAll(data) {
@@ -552,7 +755,7 @@ export function createStore({ storage, now = () => Date.now(), uuid = () => cryp
     confirmAll: (id, dates) => confirmMany(id, dates.map((date) => ({ date }))),
     skipOccurrence: (id, date) => setHandled(id, date, 'saltato'),
     unhandleOccurrence: (id, date) => setHandled(id, date, null),
-    adjustGoal, allocateGoals,
+    adjustGoal, allocateGoals, upsertDerived, addMovements, settlePerson,
   };
   for (const kind of ['Account', 'Category', 'Movement', 'Scheduled', 'Goal']) {
     const k = kind.toLowerCase();

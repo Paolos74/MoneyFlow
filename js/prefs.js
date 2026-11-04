@@ -9,6 +9,7 @@ export const DEFAULT_PREFS = {
   firstUseAt: 0,
   lastPeriod: 'mese',
   beforeImportKey: '',
+  budgetPeriod: 'calendar', // v4: 'calendar' (mese di calendario) | 'salary' (dallo stipendio)
 };
 
 export function createPrefs(storage, now = () => Date.now()) {

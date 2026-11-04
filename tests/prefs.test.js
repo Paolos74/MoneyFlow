@@ -19,3 +19,14 @@ test('preferenze illeggibili → predefiniti', () => {
   const storage = memoryStorage({ [PREFS_KEY]: '{x' });
   assert.equal(createPrefs(storage, () => 1).get().theme, 'auto');
 });
+
+test('v4: periodo di budget predefinito = mese di calendario', () => {
+  const storage = memoryStorage();
+  const p = createPrefs(storage, () => 1);
+  assert.equal(p.get().budgetPeriod, 'calendar');
+  p.set({ budgetPeriod: 'salary' });
+  assert.equal(createPrefs(storage, () => 2).get().budgetPeriod, 'salary');
+  // preferenze della v3 senza la chiave: predefinito
+  const old = memoryStorage({ [PREFS_KEY]: JSON.stringify({ theme: 'dark', firstUseAt: 5 }) });
+  assert.equal(createPrefs(old, () => 3).get().budgetPeriod, 'calendar');
+});

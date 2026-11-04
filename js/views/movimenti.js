@@ -1,10 +1,12 @@
 // Movimenti: ricerca, filtri per periodo, conto e categoria, lista per giorno con note.
 // I filtri restano nello stato della vista (e nell'indirizzo) durante i ridisegni.
+// v4: segmentato "Lista | Calendario" (il calendario non è più una scheda) e pulsante Importa (CSV).
 
-import { el, input, select, icon, emptyState, card } from '../ui.js';
+import { el, input, select, icon, emptyState, card, segmented } from '../ui.js';
 import { formatEuro, formatPercent } from '../money.js';
 import * as C from '../calc.js';
 import { dayGroups, periodPicker } from './parts.js';
+import { renderCalendar } from './calendario.js';
 
 let filters = null;
 
@@ -16,13 +18,20 @@ function fromQuery(q, prefs) {
   };
 }
 
+const LIST_KEYS = ['periodo', 'da', 'a', 'conto', 'categoria', 'q'];
+
 export function render(root, ctx) {
   const state = ctx.store.getState();
-  if (!filters || ctx.params.reset || Object.keys(ctx.query).length) {
+  const vista = ctx.query.vista === 'calendario' ? 'calendario' : 'lista';
+  const importBtn = el('a', { class: 'topbar__btn', href: '#impostazioni/importa', id: 'mov-import', text: 'Importa', attrs: { 'aria-label': 'Importa movimenti da CSV' } });
+  ctx.header({ title: 'Movimenti', actions: [importBtn] });
+  root.append(segmented([{ value: 'lista', label: 'Lista', id: 'seg-lista' }, { value: 'calendario', label: 'Calendario', id: 'seg-calendario' }], vista,
+    (v) => ctx.go(v === 'calendario' ? 'movimenti?vista=calendario' : 'movimenti'), { label: 'Vista' }));
+  if (vista === 'calendario') { renderCalendar(root, ctx); return; }
+  if (!filters || ctx.params.reset || LIST_KEYS.some((k) => k in ctx.query)) {
     filters = fromQuery(ctx.query, ctx.prefs);
     if (ctx.params.accountId) filters.accountId = ctx.params.accountId;
   }
-  ctx.header({ title: 'Movimenti' });
   const update = (patch) => {
     filters = { ...filters, ...patch };
     if (patch.key && patch.key !== 'custom') ctx.prefs.set({ lastPeriod: patch.key });

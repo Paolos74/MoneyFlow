@@ -1,12 +1,12 @@
 /* Stile di MoneyFlow in stile iOS: token chiaro/scuro e componenti.
-   Verde smeraldo come colore principale; colori per conti e categorie via --c. */
+   v4: palette pastello calda ispirata a Buddy, verde come colore principale; colori di conti e categorie via --c. */
 
 :root {
   color-scheme: light dark;
   --font: -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, "Segoe UI", Roboto, sans-serif;
   --font-num: ui-serif, "New York", Georgia, "Noto Serif", serif;
-  --radius: 18px;
-  --radius-sm: 12px;
+  --radius: 22px;
+  --radius-sm: 14px;
   --tabbar-h: 64px;
   --topbar-h: 52px;
   --safe-top: env(safe-area-inset-top, 0px);
@@ -15,98 +15,112 @@
   --safe-right: env(safe-area-inset-right, 0px);
 }
 
+/* I tre blocchi di token (chiaro, scuro, automatico scuro) devono restare uguali: lo controlla tests/contrast.test.js,
+   che calcola anche i contrasti WCAG delle coppie usate (testo ≥ 4,5:1, icone e barre ≥ 3:1). */
 :root[data-theme="light"] { color-scheme: light; }
 :root[data-theme="dark"] { color-scheme: dark; }
 :root, :root[data-theme="light"] {
-  --bg: #F2F2F7;
+  --bg: #F6F5F1;
   --surface: #FFFFFF;
-  --surface-2: #EEEEF3;
-  --text: #111114;
-  --muted: #5F5F67;
-  --separator: rgba(60, 60, 67, 0.18);
+  --surface-2: #EFEEE9;
+  --text: #16171A;
+  --muted: #5C5E65;
+  --separator: rgba(60, 60, 67, 0.16);
   --accent: #047857;
   --accent-fill: #047857;
   --on-accent: #FFFFFF;
-  --accent-soft: #E1EFEB;
+  --accent-soft: #DDF2E6;
   --danger: #C5221F;
-  --danger-soft: #F8E4E4;
+  --danger-soft: #FBE5E2;
   --danger-on-teal: #C5221F;
   --warning: #A15C07;
   --income: #047857;
-  /* Colori complementari (v3): testo, pieno con testo bianco, tenue opaco. */
-  --teal: #0E7490; --teal-fill: #0E7490; --teal-soft: #E2EEF2;
-  --indigo: #4F46E5; --indigo-fill: #4F46E5; --indigo-soft: #EAE9FC;
-  --violet: #7C3AED; --violet-fill: #7C3AED; --violet-soft: #EFE7FD;
-  --amber: #A3480A; --amber-fill: #B45309; --amber-soft: #F4E9E2;
-  --pink: #BE185D; --pink-fill: #BE185D; --pink-soft: #F7E3EC;
+  /* Colori per ambito: testo, pieno con testo bianco, tenue pastello opaco. */
+  --teal: #0E6F8A; --teal-fill: #0E7490; --teal-soft: #DDEFF6;
+  --indigo: #4F46E5; --indigo-fill: #4F46E5; --indigo-soft: #E8E7FC;
+  --violet: #7C3AED; --violet-fill: #7C3AED; --violet-soft: #EFE6FD;
+  --amber: #A3480A; --amber-fill: #B45309; --amber-soft: #FCECDB;
+  --pink: #BE185D; --pink-fill: #BE185D; --pink-soft: #FBE3ED;
+  --butter: #875200; --butter-fill: #A16207; --butter-soft: #FBF1CF;
   --chart-expense: #E5484D;
   --segment-on: #FFFFFF;
-  --bar-bg: rgba(249, 249, 251, 0.82);
-  --shadow: 0 1px 2px rgba(0, 0, 0, 0.05), 0 4px 16px rgba(0, 0, 0, 0.05);
+  --bar-bg: rgba(252, 251, 248, 0.84);
+  --shadow: 0 1px 2px rgba(40, 32, 16, 0.04), 0 6px 20px rgba(40, 32, 16, 0.06);
   --backdrop: rgba(0, 0, 0, 0.32);
-  /* Card in evidenza (Patrimonio): smeraldo → laguna, testo bianco ≥ 5,47:1 (col riflesso ≥ 4,6:1). */
-  --hero-bg: linear-gradient(150deg, #047857 0%, #0D6E68 55%, #155E75 100%);
-  --hero-shadow: 0 10px 28px rgba(14, 116, 144, 0.26);
+  /* Card protagoniste: "Quanto ti resta" verde menta, "Patrimonio totale" color banconota dorata. Testo scuro. */
+  --hero-left-bg: linear-gradient(160deg, #D9F3E5 0%, #EAF6E2 60%, #F4F4DA 100%);
+  --hero-nw-bg: linear-gradient(160deg, #FBEFC8 0%, #FBE6D3 100%);
+  --hero-tile: rgba(255, 255, 255, 0.72);
+  --ring-track: rgba(4, 120, 87, 0.16);
+  --hero-shadow: 0 8px 24px rgba(4, 120, 87, 0.10);
 }
 
 :root[data-theme="dark"] {
-  --bg: #000000;
-  --surface: #1C1C1E;
-  --surface-2: #2C2C2E;
-  --text: #F2F2F7;
-  --muted: #ACACB3;
-  --separator: rgba(235, 235, 245, 0.16);
+  --bg: #0C0D0F;
+  --surface: #1A1B1E;
+  --surface-2: #2A2B2F;
+  --text: #F3F2EE;
+  --muted: #A9ABB2;
+  --separator: rgba(235, 235, 245, 0.14);
   --accent: #34D399;
   --accent-fill: #047857;
   --on-accent: #FFFFFF;
-  --accent-soft: #203D34;
+  --accent-soft: #173A2D;
   --danger: #FF6B5E;
-  --danger-soft: #452A2A;
+  --danger-soft: #462829;
   --danger-on-teal: #FF8A80;
   --warning: #F5B54A;
   --income: #34D399;
-  --teal: #22D3EE; --teal-fill: #0E7490; --teal-soft: #1D3D43;
-  --indigo: #A5B4FC; --indigo-fill: #4F46E5; --indigo-soft: #353746;
-  --violet: #C4B5FD; --violet-fill: #7C3AED; --violet-soft: #3A3846;
-  --amber: #FBBF24; --amber-fill: #B45309; --amber-soft: #44391F;
-  --pink: #F9A8D4; --pink-fill: #BE185D; --pink-soft: #44353F;
+  --teal: #22D3EE; --teal-fill: #0E7490; --teal-soft: #133843;
+  --indigo: #A5B4FC; --indigo-fill: #4F46E5; --indigo-soft: #272A4A;
+  --violet: #C4B5FD; --violet-fill: #7C3AED; --violet-soft: #2F2747;
+  --amber: #FBBF24; --amber-fill: #B45309; --amber-soft: #3E2F15;
+  --pink: #F9A8D4; --pink-fill: #BE185D; --pink-soft: #42253A;
+  --butter: #FCD34D; --butter-fill: #A16207; --butter-soft: #3B3215;
   --chart-expense: #FF6B5E;
-  --segment-on: #636366;
-  --bar-bg: rgba(28, 28, 30, 0.82);
+  --segment-on: #545458;
+  --bar-bg: rgba(26, 27, 30, 0.84);
   --shadow: 0 1px 2px rgba(0, 0, 0, 0.4);
   --backdrop: rgba(0, 0, 0, 0.6);
-  --hero-bg: linear-gradient(150deg, #065F46 0%, #115E59 55%, #164E63 100%);
+  --hero-left-bg: linear-gradient(160deg, #0F3528 0%, #13302A 60%, #1B2D1B 100%);
+  --hero-nw-bg: linear-gradient(160deg, #3A2F14 0%, #3B281B 100%);
+  --hero-tile: rgba(0, 0, 0, 0.24);
+  --ring-track: rgba(52, 211, 153, 0.18);
   --hero-shadow: 0 1px 2px rgba(0, 0, 0, 0.4);
 }
 
 @media (prefers-color-scheme: dark) {
   :root[data-theme="auto"] {
-    --bg: #000000;
-    --surface: #1C1C1E;
-    --surface-2: #2C2C2E;
-    --text: #F2F2F7;
-    --muted: #ACACB3;
-    --separator: rgba(235, 235, 245, 0.16);
+    --bg: #0C0D0F;
+    --surface: #1A1B1E;
+    --surface-2: #2A2B2F;
+    --text: #F3F2EE;
+    --muted: #A9ABB2;
+    --separator: rgba(235, 235, 245, 0.14);
     --accent: #34D399;
     --accent-fill: #047857;
     --on-accent: #FFFFFF;
-    --accent-soft: #203D34;
+    --accent-soft: #173A2D;
     --danger: #FF6B5E;
-    --danger-soft: #452A2A;
+    --danger-soft: #462829;
     --danger-on-teal: #FF8A80;
     --warning: #F5B54A;
     --income: #34D399;
-    --teal: #22D3EE; --teal-fill: #0E7490; --teal-soft: #1D3D43;
-    --indigo: #A5B4FC; --indigo-fill: #4F46E5; --indigo-soft: #353746;
-    --violet: #C4B5FD; --violet-fill: #7C3AED; --violet-soft: #3A3846;
-    --amber: #FBBF24; --amber-fill: #B45309; --amber-soft: #44391F;
-    --pink: #F9A8D4; --pink-fill: #BE185D; --pink-soft: #44353F;
+    --teal: #22D3EE; --teal-fill: #0E7490; --teal-soft: #133843;
+    --indigo: #A5B4FC; --indigo-fill: #4F46E5; --indigo-soft: #272A4A;
+    --violet: #C4B5FD; --violet-fill: #7C3AED; --violet-soft: #2F2747;
+    --amber: #FBBF24; --amber-fill: #B45309; --amber-soft: #3E2F15;
+    --pink: #F9A8D4; --pink-fill: #BE185D; --pink-soft: #42253A;
+    --butter: #FCD34D; --butter-fill: #A16207; --butter-soft: #3B3215;
     --chart-expense: #FF6B5E;
-    --segment-on: #636366;
-    --bar-bg: rgba(28, 28, 30, 0.82);
+    --segment-on: #545458;
+    --bar-bg: rgba(26, 27, 30, 0.84);
     --shadow: 0 1px 2px rgba(0, 0, 0, 0.4);
     --backdrop: rgba(0, 0, 0, 0.6);
-    --hero-bg: linear-gradient(150deg, #065F46 0%, #115E59 55%, #164E63 100%);
+    --hero-left-bg: linear-gradient(160deg, #0F3528 0%, #13302A 60%, #1B2D1B 100%);
+    --hero-nw-bg: linear-gradient(160deg, #3A2F14 0%, #3B281B 100%);
+    --hero-tile: rgba(0, 0, 0, 0.24);
+    --ring-track: rgba(52, 211, 153, 0.18);
     --hero-shadow: 0 1px 2px rgba(0, 0, 0, 0.4);
   }
 }
@@ -266,7 +280,7 @@ button.row:active, a.row:active { background: var(--surface-2); }
 .btn-row > .btn { flex: 1 1 auto; }
 
 /* Chip e controllo segmentato */
-.chips { display: flex; gap: 8px; overflow-x: auto; padding: 2px 0 10px; scrollbar-width: none; margin: 0 -16px; padding-left: 16px; padding-right: 16px; }
+.chips { display: flex; gap: 8px; overflow-x: auto; padding: 4px 0 8px; scrollbar-width: none; margin: 0 -16px; padding-left: 16px; padding-right: 16px; }
 .chips::-webkit-scrollbar { display: none; }
 .chips--wrap { flex-wrap: wrap; overflow: visible; margin: 0; padding: 0; }
 .chip {
@@ -505,17 +519,6 @@ a.card:active { opacity: .8; }
 
 /* ---- Design v2 (verde smeraldo protagonista) ---- */
 
-/* Card in evidenza: Patrimonio in Home e in Conti. */
-.card.card--hero { position: relative; overflow: hidden; background: var(--hero-bg); color: #fff; box-shadow: var(--hero-shadow); }
-.card--hero::after { content: ""; position: absolute; right: -70px; bottom: -110px; width: 240px; height: 240px; border-radius: 50%; background: radial-gradient(closest-side, rgba(255, 255, 255, 0.10), rgba(255, 255, 255, 0)); pointer-events: none; }
-.card--hero > * { position: relative; z-index: 1; }
-.card.card--hero .card__title, .card.card--hero .hero__value, .card.card--hero .hero__sub { color: #fff; }
-.card.card--hero .card__link { color: #fff; background: rgba(0, 0, 0, 0.2); border-radius: 18px; padding: 0 14px; display: inline-flex; align-items: center; font-weight: 600; }
-.card.card--hero .card__link:active { opacity: .7; }
-/* La pillola resta alta 36 px a vista; l'area di tocco sale a 44 px (PWA-BASE §8). */
-.card.card--hero .card__link { position: relative; }
-.card.card--hero .card__link::before { content: ""; position: absolute; inset: -4px 0; }
-
 /* Sottotitoli colorati nelle card (Completato, Scadenza passata): vincono sul grigio di .hero__sub. */
 .hero__sub.is-income { color: var(--income); }
 .hero__sub.is-danger { color: var(--danger); }
@@ -584,6 +587,7 @@ body:has(.sheet) .toast-root { bottom: auto; top: calc(var(--safe-top) + 24px + 
 .card--t-violet, .section--t-violet { --tint: var(--violet); --tint-fill: var(--violet-fill); --tint-soft: var(--violet-soft); }
 .card--t-amber, .section--t-amber { --tint: var(--amber); --tint-fill: var(--amber-fill); --tint-soft: var(--amber-soft); }
 .card--t-pink, .section--t-pink { --tint: var(--pink); --tint-fill: var(--pink-fill); --tint-soft: var(--pink-soft); }
+.card--t-butter, .section--t-butter { --tint: var(--butter); --tint-fill: var(--butter-fill); --tint-soft: var(--butter-soft); }
 .card__title { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .card__badge { flex: none; width: 24px; height: 24px; border-radius: 7px; display: grid; place-items: center; background: var(--c, var(--tint-fill, var(--accent-fill))); color: #fff; }
 .card__badge svg { width: 15px; height: 15px; }
@@ -611,3 +615,125 @@ body:has(.sheet) .toast-root { bottom: auto; top: calc(var(--safe-top) + 24px + 
 /* Obiettivi: etichette di scadenza magenta tenue; Metti da parte con l'icona magenta. */
 .tag--goal { background: var(--pink-soft); color: var(--pink); }
 .sheet-intro__icon--pink { background: var(--pink-fill); color: #fff; }
+
+/* ---- Design v4: palette pastello ispirata a Buddy, card molto arrotondate, numeri protagonisti ----
+   Strutture della Parte A (spesa divisa, selettore di icone, importazione) e aspetto finale delle schermate. */
+
+.large-title { font-weight: 800; letter-spacing: -.015em; }
+.card { border-radius: var(--radius); box-shadow: var(--shadow); }
+.list { border-radius: var(--radius); box-shadow: var(--shadow); }
+.list--flat { box-shadow: none; }
+.form-group, .empty, .cal { border-radius: var(--radius); }
+.card__head { margin: -2px 0 12px; }
+.card__title { font-size: 16px; font-weight: 700; }
+.card__badge { width: 28px; height: 28px; border-radius: 9px; }
+.card__badge svg { width: 17px; height: 17px; }
+.card__link { font-weight: 600; }
+.section-header { font-weight: 600; }
+
+/* Icone di conti e categorie: riquadro arrotondato pieno col colore scelto, glifo bianco (≥ 3:1 su ogni colore della palette). */
+.row__icon { width: 36px; height: 36px; border-radius: 11px; }
+.row__icon svg { width: 20px; height: 20px; }
+.row + .row::before, .list > li + li > .row::before { left: 64px; }
+.row { min-height: 56px; }
+
+/* Controllo segmentato e chip a pillola */
+.segmented { border-radius: 999px; padding: 3px; }
+.segmented button { border-radius: 999px; min-height: 44px; }
+.segmented button[aria-pressed="true"] { box-shadow: 0 1px 4px rgba(0, 0, 0, .12); }
+.chip { border-color: transparent; background: var(--surface); box-shadow: var(--shadow); font-weight: 500; }
+
+/* Bersagli di tocco ≥ 44 pt: area invisibile alta 44 px su collegamenti e chip più bassi, aspetto invariato. */
+.card__link, .section-header a, .section-header button, .chip { position: relative; }
+.card__link::before, .section-header a::before, .section-header button::before, .chip::before {
+  content: ""; position: absolute; left: 0; right: 0; top: 50%; height: 44px; transform: translateY(-50%);
+}
+
+/* Barre di avanzamento più piene, con le estremità arrotondate */
+.progress { height: 10px; border-radius: 5px; margin: 8px 0 4px; }
+.progress__fill { border-radius: 5px; }
+
+/* Riquadri dei totali: fondi pastello per ambito */
+.stat { border-radius: var(--radius-sm); padding: 10px 12px 11px; }
+.stat--planned { background: var(--violet-soft); }
+
+/* Card protagonista "Quanto ti resta" / "Rimanente" */
+.card.card--remaining { background: var(--hero-left-bg); box-shadow: var(--hero-shadow); padding: 18px 18px 16px; }
+.remaining__main { display: flex; align-items: center; gap: 12px; }
+.remaining__text { flex: 1; min-width: 0; }
+.card--remaining .hero__label { font-size: 14px; color: var(--muted); }
+.card--remaining .hero__value { font-size: 42px; font-weight: 700; margin: 2px 0 4px; white-space: nowrap; overflow-wrap: normal; }
+.card--remaining .hero__value.is-long { font-size: 32px; }
+.card--remaining .hero__sub { margin: 0 0 4px; }
+.remaining__ring { flex: none; width: 84px; height: 84px; }
+.remaining__ring svg { width: 84px; height: 84px; }
+.ring__track { stroke: var(--ring-track); }
+.ring__fill { stroke: var(--accent); }
+.remaining__ring.is-over .ring__fill { stroke: var(--danger); }
+.ring__center { fill: var(--text); font-family: var(--font-num); font-weight: 700; }
+.ring__sub { fill: var(--muted); font-family: var(--font); }
+.today-box { display: flex; align-items: flex-start; gap: 12px; background: var(--hero-tile); border-radius: 16px; padding: 12px 14px; margin: 12px 0; }
+.today-box__icon { flex: none; width: 36px; height: 36px; border-radius: 50%; display: grid; place-items: center; background: var(--accent-fill); color: var(--on-accent); }
+.today-box__text { flex: 1; min-width: 0; }
+.card .today-box p { margin: 0; }
+.card .today-box .today-box__label { font-size: 14px; font-weight: 600; color: var(--text); }
+.card .today-box .today-box__sub { font-size: 13px; color: var(--muted); }
+.card .today-box .today-box__value { font-family: var(--font-num); font-size: 28px; line-height: 1.15; margin: 2px 0; font-weight: 700; color: var(--text); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.card--remaining .stat { background: var(--hero-tile); }
+.card--remaining .stats + .hero__sub { margin-top: 10px; }
+.remaining__kv { background: var(--hero-tile); border-radius: 16px; padding: 4px 14px; margin: 0 0 4px; }
+
+/* Card "Patrimonio totale" in Conti: color banconota dorata, numero molto grande */
+.card.card--networth { background: var(--hero-nw-bg); box-shadow: var(--hero-shadow); padding: 18px; }
+.card--networth .hero__value { font-size: 44px; font-weight: 700; margin: 4px 0 6px; }
+.card--networth .hero__sub { color: var(--muted); }
+
+/* Piano: una riga per categoria con icona, barra colorata e quanto resta */
+a.meter.meter--cat, .meter--cat { display: flex; gap: 12px; align-items: center; }
+.meter--cat .row__icon { align-self: flex-start; margin-top: 2px; }
+.meter__body { flex: 1; min-width: 0; }
+.meter__name { font-weight: 600; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.meter__top span:last-child { flex: none; }
+
+/* Obiettivi: card con l'icona nel colore dell'obiettivo */
+.goal-card .card__head { justify-content: flex-start; align-items: center; gap: 10px; }
+.goal__heading { flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; align-items: flex-start; gap: 4px; }
+.goal-card .goal__title { flex: none; max-width: 100%; white-space: normal; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; overflow-wrap: anywhere; }
+.goal-card .meter__top .num { font-family: var(--font-num); font-size: 22px; font-weight: 700; }
+
+/* Barra delle schede e pulsante + */
+.tab[aria-current="page"] { background: var(--accent-soft); }
+.fab { box-shadow: 0 8px 22px rgba(4, 120, 87, .32); }
+
+/* Calendario: giorno scelto in un cerchio verde, oggi in verde */
+.cal { box-shadow: var(--shadow); }
+.cal__num { width: 32px; height: 32px; line-height: 32px; }
+
+/* Stati vuoti e fogli */
+.empty { box-shadow: var(--shadow); }
+.empty__icon { border-radius: 50%; }
+.sheet { border-radius: 20px 20px 0 0; }
+
+/* Spesa divisa tra più persone */
+.person-row { margin: 0 0 8px; }
+.person-row__fields { display: flex; gap: 8px; align-items: center; }
+.person-row__fields .input { flex: 1 1 auto; min-width: 0; background: var(--surface-2); border-radius: 12px; padding: 6px 12px; }
+.person-row__fields .person-row__amount { flex: 0 0 7.5em; text-align: right; font-variant-numeric: tabular-nums; }
+.icon-btn { flex: 0 0 auto; min-width: 44px; min-height: 44px; display: inline-flex; align-items: center; justify-content: center; border: 0; border-radius: 50%; background: var(--danger-soft); color: var(--danger); }
+.icon-btn svg { width: 18px; height: 18px; }
+
+/* Selettore di icone: griglia di cerchi da 46 px, quello scelto pieno verde con un anello */
+.icon-picker { display: grid; grid-template-columns: repeat(auto-fill, minmax(46px, 1fr)); gap: 8px; padding: 6px 0; }
+.icon-pick { width: 46px; height: 46px; justify-self: center; display: inline-flex; align-items: center; justify-content: center; border: 0; border-radius: 50%; background: var(--surface-2); color: var(--text); position: relative; }
+.icon-pick svg { width: 22px; height: 22px; }
+.icon-pick[aria-pressed="true"] { background: var(--accent-fill); color: var(--on-accent); }
+.icon-pick[aria-pressed="true"]::after { content: ""; position: absolute; inset: -4px; border-radius: 50%; border: 2.5px solid var(--accent-fill); }
+.icon-pick:active { transform: scale(.94); }
+
+/* Importazione CSV */
+.import-row__check { display: inline-flex; align-items: center; justify-content: center; min-width: 44px; min-height: 44px; }
+.import-row__check input { width: 22px; height: 22px; accent-color: var(--accent-fill); }
+
+@media (prefers-contrast: more) {
+  .card.card--remaining, .card.card--networth, .today-box, .remaining__kv { border: 1px solid var(--separator); }
+}

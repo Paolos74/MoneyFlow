@@ -1,5 +1,5 @@
 // Statistiche: ciambella delle uscite per categoria, barre entrate/uscite per mese, linea del
-// patrimonio, tasso di risparmio per mese, riepilogo abbonamenti, accesso a Stipendio e tasse.
+// patrimonio, tasso di risparmio per mese, riepilogo abbonamenti, accesso a Stipendio e tasse e al fondo pensione.
 
 import { el, card, list, row, svgNode, emptyState, section } from '../ui.js';
 import { formatEuro, formatPercent } from '../money.js';
@@ -83,5 +83,7 @@ export function render(root, ctx) {
       ...rs.items.map((i) => row({ icon: 'repeat', color: C.scheduledColor(state, i.sched), planned: true, title: scheduledTitle(state, i.sched), subtitle: freqLabel(i.sched), value: formatEuro(i.monthly), valueSub: 'al mese', href: `#programmati/${i.sched.id}` })))
       : emptyState({ icon: 'repeat', title: 'Nessun abbonamento', text: 'Le uscite programmate ripetute compaiono qui con il costo al mese e all\'anno.' })));
 
-  root.append(section({}, list(row({ icon: 'doc', color: 'var(--indigo-fill)', title: 'Stipendio e tasse', subtitle: 'Busta paga, stima IRPEF e addizionali', href: '#statistiche/stipendio', id: 'link-salary' }))));
+  root.append(section({}, list(
+    row({ icon: 'doc', color: 'var(--indigo-fill)', title: 'Stipendio e tasse', subtitle: 'Busta paga, stima IRPEF e addizionali', href: '#statistiche/stipendio', id: 'link-salary' }),
+    row({ icon: 'coin', color: 'var(--indigo-fill)', title: 'Se aumento il fondo pensione', subtitle: 'Stima di costo e risparmio di tasse', href: '#statistiche/fondo-pensione', id: 'link-pension-stats' }))));
 }

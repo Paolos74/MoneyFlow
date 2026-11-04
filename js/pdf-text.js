@@ -1,5 +1,5 @@
 // Lettore PDF minimo, solo sul dispositivo e senza librerie: estrae le righe di testo di un PDF.
-// Stream FlateDecode con DecompressionStream('deflate'), object stream, font semplici e mappe ToUnicode.
+// Stream FlateDecode con DecompressionStream('deflate'), object stream, font semplici, mappe ToUnicode e Form XObject.
 // Sperimentale: nessuna garanzia sui PDF con layout o codifiche diverse.
 
 export class PdfReadError extends Error {
@@ -455,11 +455,26 @@ const mul = (a, b) => [
 ];
 const ID = [1, 0, 0, 1, 0, 0];
 
-// Interpreta gli operatori di testo e restituisce i pezzi { x, y, text, seq }.
-function runContent(src, fonts, pieces) {
+// Font di un dizionario /Resources: Map nome → decodificatore.
+async function loadFonts(doc, res) {
+  const fonts = new Map();
+  const fontDict = res instanceof Map ? doc.resolve(res.get('Font')) : null;
+  if (fontDict instanceof Map) {
+    for (const [name, ref] of fontDict) fonts.set(name, await loadFont(doc, ref));
+  }
+  return fonts;
+}
+
+const MAX_FORM_DEPTH = 5;
+
+// Interpreta gli operatori di testo e aggiunge a `pieces` i pezzi { x, y, text, seq }.
+// ctx = { doc, fonts, resources, depth, visited }: con `Do` legge anche il testo dei Form XObject
+// (moduli prestampati con le etichette fisse in un modello separato dai valori).
+async function runContent(src, ctx, pieces, startCtm = ID) {
+  const { doc, fonts } = ctx;
   const lx = new Lexer(src);
   let ops = [];
-  let ctm = ID;
+  let ctm = startCtm;
   const stack = [];
   let tm = ID;
   let lm = ID;
@@ -522,6 +537,12 @@ function runContent(src, fonts, pieces) {
         }
         break;
       }
+      case 'Do': {
+        const name = ops.length ? nameOf(ops[ops.length - 1]) : null;
+        last = null;
+        if (name) await runForm(name, ctx, pieces, ctm);
+        break;
+      }
       case 'BI': {
         // immagine in linea: salta fino a "EI"
         const s = lx.s;
@@ -534,6 +555,33 @@ function runContent(src, fonts, pieces) {
     }
     ops = [];
   }
+}
+
+// Form XObject richiamato con `Do`: /Matrix (default identità) per la CTM corrente, font delle sue /Resources
+// (se mancano, quelli di chi lo richiama), profondità massima 5 e nessun oggetto visitato due volte (niente cicli).
+// Le immagini (/Subtype /Image) si ignorano.
+async function runForm(name, ctx, pieces, ctm) {
+  const { doc } = ctx;
+  if (ctx.depth >= MAX_FORM_DEPTH) return;
+  const xobjs = ctx.resources instanceof Map ? doc.resolve(ctx.resources.get('XObject')) : null;
+  const ref = xobjs instanceof Map ? xobjs.get(name) : null;
+  if (!ref || typeof ref !== 'object' || !('ref' in ref) || ctx.visited.has(ref.ref)) return;
+  const o = doc.objs.get(ref.ref);
+  if (!o || o.raw === null || nameOf(doc.resolve(o.value.get('Subtype'))) !== 'Form') return;
+  const data = await doc.streamData(ref.ref);
+  if (!data) return;
+  const mx = doc.resolve(o.value.get('Matrix'));
+  const matrix = Array.isArray(mx) && mx.length === 6 ? mx.map((v) => (typeof v === 'number' ? v : 0)) : ID;
+  const res = doc.resolve(o.value.get('Resources'));
+  const own = res instanceof Map && doc.resolve(res.get('Font')) instanceof Map;
+  const sub = {
+    doc,
+    fonts: own ? await loadFonts(doc, res) : ctx.fonts,
+    resources: res instanceof Map ? res : ctx.resources,
+    depth: ctx.depth + 1,
+    visited: new Set([...ctx.visited, ref.ref]),
+  };
+  await runContent(data, sub, pieces, mul(matrix, ctm));
 }
 
 // Raggruppa i pezzi per y (tolleranza 2 punti, dall'alto in basso) e li ordina per x.
@@ -567,11 +615,7 @@ export async function extractPdfLines(bytes) {
   for (const pageNum of doc.pages()) {
     const page = doc.get(pageNum);
     const res = doc.inherited(pageNum, 'Resources');
-    const fontDict = res instanceof Map ? doc.resolve(res.get('Font')) : null;
-    const fonts = new Map();
-    if (fontDict instanceof Map) {
-      for (const [name, ref] of fontDict) fonts.set(name, await loadFont(doc, ref));
-    }
+    const fonts = await loadFonts(doc, res);
     let contents = page instanceof Map ? page.get('Contents') : null;
     const resolved = doc.resolve(contents);
     if (Array.isArray(resolved)) contents = resolved;
@@ -584,7 +628,8 @@ export async function extractPdfLines(bytes) {
       }
     }
     const pieces = [];
-    try { runContent(text, fonts, pieces); } catch { /* contenuto non interpretabile: si tiene quanto letto */ }
+    const ctx = { doc, fonts, resources: res instanceof Map ? res : null, depth: 0, visited: new Set() };
+    try { await runContent(text, ctx, pieces); } catch { /* contenuto non interpretabile: si tiene quanto letto */ }
     lines.push(...toLines(pieces));
   }
   if (!lines.length) throw new PdfReadError(MSG_NO_TEXT);

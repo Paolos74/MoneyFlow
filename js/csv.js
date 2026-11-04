@@ -35,6 +35,9 @@ function accountName(state, id) {
   return s;
 }
 
+// Rettifica "Allinea al saldo reale" del deposito (v4): variazione con `align`.
+const typeLabel = (m) => (m.type === 'variazione' && m.align ? 'Rettifica saldo' : TYPE_LABELS[m.type] || m.type);
+
 function amountText(state, m) {
   const a = state.accounts.find((x) => x.id === m.accountId);
   const crypto = a && a.kind === 'crypto';
@@ -58,7 +61,7 @@ export function buildCsv(state, { from, to, format = 'semicolon' }) {
     rows.push([
       formatDateIt(m.date),
       textCell(conto, sep),
-      textCell(TYPE_LABELS[m.type] || m.type, sep),
+      textCell(typeLabel(m), sep),
       textCell(cat, sep),
       textCell(m.description, sep),
       quote(amountText(state, m), sep, f.quoteNumbers),

@@ -38,7 +38,7 @@ export function render(root, ctx) {
 
   renderEstimate(root, ctx, year, y);
 
-  root.append(section({}, list(row({ icon: 'coin', color: 'var(--indigo-fill)', title: 'Se aumento il fondo pensione', subtitle: 'Quanto costa al mese e quante tasse risparmi', href: '#impostazioni/fondo-pensione', id: 'link-pension' }))));
+  root.append(section({}, list(row({ icon: 'coin', color: 'var(--indigo-fill)', title: 'Se aumento il fondo pensione', subtitle: 'Quanto costa al mese e quante tasse risparmi', href: '#statistiche/fondo-pensione', id: 'link-pension' }))));
 
   const stip = C.sortedCategories(state, 'entrata').find((c) => c.role === 'stipendio');
   if (!y.rows.length) {

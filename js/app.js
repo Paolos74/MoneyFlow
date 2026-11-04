@@ -7,7 +7,9 @@ import { createSync, SYNC_KEY } from './sync.js';
 import { createTaxSettings, TAX_KEY } from './tax-settings.js';
 import { el, icon, clear, preserveFocus } from './ui.js';
 import { todayISO } from './dates.js';
+import { resolveRoute } from './routes.js';
 import { openQuickAdd } from './views/movimento-form.js';
+import { reconcileInterest } from './interest.js';
 import * as home from './views/home.js';
 import * as daConfermare from './views/da-confermare.js';
 import * as daRicevere from './views/da-ricevere.js';
@@ -16,6 +18,8 @@ import * as movimenti from './views/movimenti.js';
 import * as calendario from './views/calendario.js';
 import * as statistiche from './views/statistiche.js';
 import * as stipendio from './views/stipendio.js';
+import * as fondoPensione from './views/fondo-pensione.js';
+import * as budget from './views/budget.js';
 import * as conti from './views/conti.js';
 import * as conto from './views/conto.js';
 import * as obiettivo from './views/obiettivo.js';
@@ -42,7 +46,7 @@ const topbar = $('topbar');
 const isDark = (theme) => theme === 'dark' || (theme === 'auto' && matchMedia('(prefers-color-scheme: dark)').matches);
 function applyTheme(theme = prefs.get().theme) {
   document.documentElement.setAttribute('data-theme', theme);
-  document.querySelector('meta[name="theme-color"]')?.setAttribute('content', isDark(theme) ? '#000000' : '#F2F2F7');
+  document.querySelector('meta[name="theme-color"]')?.setAttribute('content', isDark(theme) ? '#0C0D0F' : '#F6F5F1');
 }
 matchMedia('(prefers-color-scheme: dark)').addEventListener?.('change', () => applyTheme());
 
@@ -73,21 +77,15 @@ function parseHash() {
 }
 const currentRoute = () => parseHash().path;
 
-function resolve(path) {
-  const [a, b] = path;
-  switch (a) {
-    case 'home': return { view: home, tab: 'home' };
-    case 'da-confermare': return { view: daConfermare, tab: 'home' };
-    case 'da-ricevere': return { view: daRicevere, tab: 'home' };
-    case 'programmati': return { view: programmati, tab: 'home' };
-    case 'movimenti': return { view: movimenti, tab: 'movimenti' };
-    case 'calendario': return { view: calendario, tab: 'calendario' };
-    case 'statistiche': return b === 'stipendio' ? { view: stipendio, tab: 'statistiche' } : { view: statistiche, tab: 'statistiche' };
-    case 'conti': return b && b !== 'obiettivi' ? { view: conto, tab: 'conti' } : { view: conti, tab: 'conti' };
-    case 'obiettivi': return b ? { view: obiettivo, tab: 'conti' } : { redirect: 'conti/obiettivi' };
-    case 'impostazioni': return { view: impostazioni, tab: 'home' };
-    default: return { redirect: 'home' };
-  }
+// Nomi delle rotte (js/routes.js) → moduli delle viste.
+const VIEWS = {
+  home, 'da-confermare': daConfermare, 'da-ricevere': daRicevere, programmati, movimenti, budget,
+  statistiche, stipendio, 'fondo-pensione': fondoPensione, conti, conto, obiettivo, impostazioni,
+};
+
+function resolve(path, query) {
+  const r = resolveRoute(path, query);
+  return r.redirect ? r : { view: VIEWS[r.name], tab: r.tab };
 }
 
 // Parametri passati in memoria da go(); restano validi finché non si cambia rotta.
@@ -135,7 +133,7 @@ function render() {
 
 function renderNow() {
   const { path, query } = parseHash();
-  const r = resolve(path);
+  const r = resolve(path, query);
   if (r.redirect) { location.replace('#' + r.redirect); return; }
   for (const t of document.querySelectorAll('.tab')) {
     if (t.dataset.tab === r.tab) t.setAttribute('aria-current', 'page'); else t.removeAttribute('aria-current');
@@ -169,6 +167,22 @@ addEventListener('hashchange', () => {
 });
 
 store.subscribe(() => rerender());
+
+// ---- Interessi dei depositi (v4) ----
+// All'avvio, al ritorno in primo piano e dopo ogni modifica dello store (anche dalla sync).
+// Il flag evita il rientro; la passata successiva non trova differenze e non salva, quindi il ciclo termina.
+let reconciling = false;
+let reconcileQueued = false;
+function runReconcile() {
+  if (reconciling) return;
+  reconciling = true;
+  try { reconcileInterest(store, todayISO()); } catch (e) { console.warn('Interessi non aggiornati:', e?.message || e); } finally { reconciling = false; }
+}
+store.subscribe(() => {
+  if (reconciling || reconcileQueued) return;
+  reconcileQueued = true;
+  queueMicrotask(() => { reconcileQueued = false; runReconcile(); });
+});
 sync.subscribe(() => { if (currentRoute()[0] === 'impostazioni') rerender(); });
 
 // Più schede aperte: se un'altra scheda salva, ricarica e ridisegna.
@@ -229,18 +243,20 @@ function getVersion() {
 }
 
 document.addEventListener('visibilitychange', () => {
-  if (document.visibilityState === 'visible') { sync.onVisible(); rerender(); }
+  if (document.visibilityState === 'visible') { runReconcile(); sync.onVisible(); rerender(); }
 });
 
 // ---- Avvio ----
 for (const span of document.querySelectorAll('.tab__icon')) span.append(icon(span.dataset.icon, 24));
 $('fab').append(icon('plus', 30));
-// Nel Calendario il + apre il foglio sul giorno scelto; nelle altre schede su oggi.
+// Nel Calendario di Movimenti il + apre il foglio sul giorno scelto; altrove su oggi.
+const inCalendar = () => { const { path, query } = parseHash(); return path[0] === 'movimenti' && query.vista === 'calendario'; };
 $('fab').addEventListener('click', () => openQuickAdd({ store, prefs, go, tax: taxSettings, today: () => todayISO() },
-  { date: currentRoute()[0] === 'calendario' ? calendario.selectedDay() : undefined }));
+  { date: inCalendar() ? calendario.selectedDay() || undefined : undefined }));
 applyTheme();
 updateOnline();
 if (!location.hash) history.replaceState(null, '', '#home');
+runReconcile();
 render();
 sync.start();
 registerSW().catch((e) => console.warn('Service worker non registrato:', e?.message || e));

@@ -1,5 +1,6 @@
 // Calendario: mese da lunedì con pallini colorati per categoria; programmati futuri e da
 // confermare con contorno tratteggiato. Tocco su un giorno → movimenti e programmati sotto.
+// v4: non è più una scheda ma la vista "Calendario" di Movimenti (#movimenti?vista=calendario&mese=&giorno=).
 
 import { el, icon, list, section, row, emptyState, button } from '../ui.js';
 import { monthOf, addMonthsYM, monthLabel, WEEKDAYS_SHORT, formatDayHeader, isValidISO, parseISO } from '../dates.js';
@@ -12,21 +13,20 @@ let selected = null;
 // Giorno scelto nel calendario: il + lo usa come data del nuovo movimento.
 export const selectedDay = () => selected;
 
-export function render(root, ctx) {
+export function renderCalendar(root, ctx) {
   const state = ctx.store.getState();
   const today = ctx.today();
   if (isValidISO(ctx.query.giorno)) selected = ctx.query.giorno;
   let ym = /^\d{4}-\d{2}$/.test(ctx.query.mese || '') ? ctx.query.mese : monthOf(selected || today);
   if (!selected || monthOf(selected) !== ym) selected = monthOf(today) === ym ? today : `${ym}-01`;
-  ctx.header({ title: 'Calendario' });
 
   const goMonth = (n) => {
     ym = addMonthsYM(ym, n);
     selected = monthOf(today) === ym ? today : `${ym}-01`;
-    ctx.setQuery({ mese: ym, giorno: selected });
+    ctx.setQuery({ vista: 'calendario', mese: ym, giorno: selected });
     ctx.rerender();
   };
-  const pick = (d) => { selected = d; ctx.setQuery({ mese: monthOf(d), giorno: d }); ctx.rerender(); };
+  const pick = (d) => { selected = d; ctx.setQuery({ vista: 'calendario', mese: monthOf(d), giorno: d }); ctx.rerender(); };
 
   const weeks = C.calendarMonth(state, ym, today);
   const grid = el('div', { class: 'cal__grid', attrs: { role: 'grid', 'aria-label': monthLabel(ym) } });

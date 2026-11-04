@@ -1,7 +1,7 @@
 // Helper DOM di MoneyFlow: el(), icone, fogli dal basso, avvisi, toast con Annulla,
 // liste, chip, segmentato, campi, condivisione/download. Testo dell'utente solo con textContent.
 
-import { iconSvg } from './icons.js';
+import { iconSvg, PICK_ICONS, PICK_ICON_LABELS } from './icons.js';
 import { ValidationError, StorageError } from './errors.js';
 import { PALETTE } from './store.js';
 
@@ -74,7 +74,7 @@ export function list(...rows) {
   return el('div', { class: 'list' }, ...rows);
 }
 
-// tint: colore dell'ambito (teal, indigo, violet, amber, pink, emerald); icon: glifo nel riquadro accanto al titolo;
+// tint: colore dell'ambito (teal, indigo, violet, amber, pink, butter, emerald); icon: glifo nel riquadro accanto al titolo;
 // color: colore del riquadro (es. quello del conto) al posto della tinta.
 export function card({ title, link, cls = '', tint, icon: ic, color }, ...content) {
   const badge = ic ? el('span', { class: 'card__badge', vars: color ? { '--c': color } : {} }, icon(ic)) : null;
@@ -180,6 +180,22 @@ export function colorPicker(value, onChange) {
         type: 'button', class: 'swatch', vars: { '--c': c }, attrs: { 'aria-pressed': String(c === cur), 'aria-label': 'Colore ' + c },
         on: { click: () => { onChange(c); draw(c); } },
       }));
+    }
+  };
+  draw(value);
+  return wrap;
+}
+
+// Selettore di icone per conti e categorie (v4): griglia di PICK_ICONS, pulsanti con aria-pressed.
+export function iconPicker(value, onChange) {
+  const wrap = el('div', { class: 'icon-picker', attrs: { role: 'group', 'aria-label': 'Icona' } });
+  const draw = (cur) => {
+    clear(wrap);
+    for (const name of PICK_ICONS) {
+      wrap.append(el('button', {
+        type: 'button', class: 'icon-pick', id: 'icon-' + name, attrs: { 'aria-pressed': String(name === cur), 'aria-label': 'Icona ' + PICK_ICON_LABELS[name] },
+        on: { click: () => { onChange(name); draw(name); } },
+      }, icon(name)));
     }
   };
   draw(value);

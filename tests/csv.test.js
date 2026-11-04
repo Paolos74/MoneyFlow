@@ -57,3 +57,19 @@ test('formato , (Numbers, Google Fogli) con importi tra virgolette', () => {
 test('nome del file', () => {
   assert.equal(csvFileName('2025-03-01', '2025-03-31'), 'MoneyFlow_movimenti_2025-03-01_2025-03-31.csv');
 });
+
+test('v4: interessi come Entrata · Interessi, rettifica come "Rettifica saldo"', () => {
+  const s = {
+    accounts: [{ id: 'd', name: 'Deposito', kind: 'eur', asset: null, initial: 0, deleted: false }],
+    categories: [{ id: 'default-entrata-interessi', name: 'Interessi', type: 'entrata', deleted: false }],
+    movements: [
+      { id: 'interest-d-2026-03', type: 'entrata', date: '2026-03-31', amount: 152, accountId: 'd', categoryId: 'default-entrata-interessi', description: 'Interessi Marzo 2026', interest: { accountId: 'd', month: '2026-03' }, createdAt: 1, deleted: false },
+      { id: 'align-d-2026-03-31', type: 'variazione', date: '2026-03-31', amount: -37, accountId: 'd', align: { balance: 100000 }, description: 'Allineamento al saldo reale', createdAt: 2, deleted: false },
+    ],
+  };
+  assert.equal(buildCsv(s, { from: '2026-03-01', to: '2026-03-31' }), '\uFEFF' + [
+    'Data;Conto;Tipo;Categoria;Descrizione;Importo',
+    '31/03/2026;Deposito;Entrata;Interessi;Interessi Marzo 2026;1,52',
+    '31/03/2026;Deposito;Rettifica saldo;;Allineamento al saldo reale;-0,37',
+  ].join('\r\n') + '\r\n');
+});

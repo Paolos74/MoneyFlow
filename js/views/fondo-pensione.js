@@ -12,7 +12,9 @@ let draft = null;
 
 const kv = (label, value, id, cls = '') => el('div', { class: 'kv' }, el('span', { text: label }), el('span', { id, class: cls, text: value }));
 
+// v4: rotta #statistiche/fondo-pensione (prima in Impostazioni → Strumenti, che ora rimanda qui).
 export function render(root, ctx) {
+  ctx.header({ title: 'Se aumento il fondo pensione', back: { href: '#statistiche/stipendio', label: 'Stipendio' } });
   const year = Number(ctx.today().slice(0, 4));
   const s = ctx.tax.get();
   if (!draft) {

@@ -60,6 +60,19 @@ export function donut(slices, { size = 220, thickness = 34, center = '', centerS
   return `<svg ${NS} viewBox="0 0 ${size} ${size}" role="img" aria-label="${esc(label)}"><title>${esc(label)}</title>${body}${txt}</svg>`;
 }
 
+/** Anello di avanzamento (v4, "Quanto ti resta"): fraction 0..1 della circonferenza, partenza in alto, senso orario.
+ *  Colori dal CSS (classi ring__track e ring__fill); center è il testo grande al centro, sub quello piccolo sotto. */
+export function ring(fraction, { size = 84, thickness = 10, center = '', sub = '', label = 'Avanzamento' } = {}) {
+  const c = size / 2;
+  const r = c - thickness / 2 - 1;
+  const len = 2 * Math.PI * r;
+  const f = Math.max(0, Math.min(1, Number(fraction) || 0));
+  const fill = f > 0 ? `<circle class="ring__fill" cx="${c}" cy="${c}" r="${r2(r)}" fill="none" stroke-width="${thickness}" stroke-linecap="round" stroke-dasharray="${r2(len * f)} ${r2(len)}" transform="rotate(-90 ${c} ${c})"/>` : '';
+  const txt = `<text class="ring__center" x="${c}" y="${c + (sub ? 2 : 6)}" text-anchor="middle" font-size="18">${esc(center)}</text>`
+    + (sub ? `<text class="ring__sub" x="${c}" y="${c + 16}" text-anchor="middle" font-size="10">${esc(sub)}</text>` : '');
+  return `<svg ${NS} viewBox="0 0 ${size} ${size}" role="img" aria-label="${esc(label)}"><title>${esc(label)}</title><circle class="ring__track" cx="${c}" cy="${c}" r="${r2(r)}" fill="none" stroke-width="${thickness}"/>${fill}${txt}</svg>`;
+}
+
 /** months: [{ label, income, expense }] — barre affiancate entrate/uscite */
 export function bars(months, { width = 340, height = 180, label = 'Entrate e uscite per mese', format = String } = {}) {
   const top = 10;

@@ -137,14 +137,15 @@ export function tradeEuroCents(qtyUnits, priceCents) {
   return Number.isSafeInteger(n) ? n : null;
 }
 
-// Percentuale scritta dall'utente → punti base interi (1,73 % = 173). Da 0 a 10 %.
-export function parsePercentInput(text) {
+// Percentuale scritta dall'utente → punti base interi (1,73 % = 173). Da 0 a `max` punti base
+// (predefinito 1000 = 10 %; la ritenuta del deposito arriva a 10000 = 100 %).
+export function parsePercentInput(text, { max = 1000 } = {}) {
   if (typeof text !== 'string') return null;
   const s = text.replace(/[\s\u00A0\u202F]/g, '').replace(/%$/, '');
-  const m = /^(\d{1,2})(?:[.,](\d{1,2}))?$/.exec(s);
+  const m = /^(\d{1,3})(?:[.,](\d{1,2}))?$/.exec(s);
   if (!m) return null;
   const bp = Number(m[1]) * 100 + Number(((m[2] || '') + '00').slice(0, 2));
-  return bp <= 1000 ? bp : null;
+  return bp <= max ? bp : null;
 }
 
 // 173 → "1,73%"

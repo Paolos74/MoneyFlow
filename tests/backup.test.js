@@ -53,6 +53,18 @@ test('la fixture v1 si importa come backup', () => {
   assert.ok(backupSummary(data).movements > 0);
 });
 
+for (const v of ['v2', 'v3']) {
+  test(`la fixture ${v} si importa come backup, andata e ritorno identico`, () => {
+    const raw = readFileSync(new URL(`./fixtures/data-${v}.json`, import.meta.url), 'utf8');
+    const data = parseBackup(raw);
+    assert.deepEqual(data, JSON.parse(raw));
+    const store = createStore({ storage: memoryStorage(), now: clock(), uuid: seqUuid('z') });
+    store.replaceAll(data);
+    const back = parseBackup(JSON.stringify(createBackup(store.getState())));
+    assert.deepEqual(back, JSON.parse(raw));
+  });
+}
+
 test('nome del file di backup', () => {
   assert.match(backupFileName(new Date(2025, 2, 7, 10).getTime()), /^MoneyFlow_backup_2025-03-07\.json$/);
 });

@@ -1,22 +1,24 @@
 # CONTESTO di MoneyFlow (per le chat future)
 
 PWA statica personale per un'utente italiana non sviluppatrice: spese, entrate, stipendio, conti in euro e crypto, calendario, pagamenti programmati, budget, obiettivi, statistiche, backup/CSV, sync Firebase facoltativa.
-Metodo e stack: `PWA-BASE.md` (vincolante). Decisioni dell'utente: `MONEYFLOW-DECISIONI.md` (D1–D24, A–I) e `MONEYFLOW-V2-DECISIONI.md` (v2, vince in caso di conflitto); qui c'è solo ciò che serve per lavorare sul codice.
+Metodo e stack: `PWA-BASE.md` (vincolante). Decisioni dell'utente: `MONEYFLOW-DECISIONI.md` (D1–D24, A–I), `MONEYFLOW-V2-DECISIONI.md` (v2) e `MONEYFLOW-V4-DECISIONI.md` (v4, vince in caso di conflitto); qui c'è solo ciò che serve per lavorare sul codice.
 
-- Versione: `moneyflow-v3` (`VERSION` in `sw.js`), branch `moneyflow-v3` (solo design: palette, colori per sezione, icona dell'app).
-- v2 pubblicata: commit `e75ed030f88cd297ce21aa2869ce8c8c07ec7f83`. Lo zip della v3 = `git diff --name-only e75ed030f88cd297ce21aa2869ce8c8c07ec7f83 HEAD` (senza `.agents/`, `docs/`); file da cancellare su GitHub = `git diff --name-status e75ed030f88cd297ce21aa2869ce8c8c07ec7f83 HEAD | grep ^D` (le 5 icone vecchie). Per il rilascio successivo usare lo sha di `main` dopo il merge `--ff-only` della v3 (`git log -1 main`).
+- Versione: `moneyflow-v4` (`VERSION` in `sw.js`), branch `moneyflow-v4`: 5 schede (Home, Movimenti, Budget, Statistiche, Conti), periodo dallo stipendio, quanto ti resta / puoi spendere oggi, spesa divisa tra più persone, import CSV, conto deposito con interessi automatici, netto letto dal PDF a modulo, icone di conti e categorie; design (Parte B) ispirato a Buddy.
+- v3 pubblicata: commit `a730f75b6285e499cdaff33dbc379c428ae2df1c` (base della v4). Lo zip della v4 = `git diff --name-only a730f75 HEAD` (senza `.agents/`, `.worktrees/`, `docs/`); file da cancellare su GitHub = `git diff --name-status a730f75 HEAD | grep ^D`. Per il rilascio successivo usare lo sha di `main` dopo il merge `--ff-only` della v4.
 - Nessun riferimento al lavoro dell'utente nei file (controllato da `tests/static.test.js`).
 
 ## Comandi
 - Test: `node --test tests/*.test.js`
 - Sintassi: `for f in $(git ls-files -co --exclude-standard '*.js'); do node --check "$f" || exit 1; done`
-- Icone: `python3 tools/make_icons.py` → `icons/moneyflow-v3-{192,512,maskable-512,apple-touch-180,favicon-32}.png` (nomi con la versione, così i telefoni non riusano l'icona vecchia; a ogni nuovo disegno cambiare il nome, aggiornare manifest, `index.html`, `offline.html`, ASSETS e `tests/static.test.js`)
-- PDF sintetici della busta paga (dati inventati) per i test: `python3 tools/make_payslip_pdf.py` → `tests/fixtures/busta-paga-sintetica.pdf` e `busta-paga-sintetica-cid.pdf`
+- Icone: `python3 tools/make_icons.py` → `icons/moneyflow-v4.svg`, `icons/moneyflow-v4-favicon.svg` e `icons/moneyflow-v4-{192,512,maskable-512,apple-touch-180,favicon-32}.png` (stessa geometria, banconote) (nomi con la versione, così i telefoni non riusano l'icona vecchia; a ogni nuovo disegno cambiare il nome, aggiornare manifest, `index.html`, `offline.html`, ASSETS e `tests/static.test.js`)
+- PDF sintetici della busta paga (dati inventati) per i test: `python3 tools/make_payslip_pdf.py` → `tests/fixtures/busta-paga-sintetica.pdf`, `busta-paga-sintetica-cid.pdf` e (v4) `busta-paga-sintetica-modulo.pdf` (etichette in un Form XObject, "NETTO A PAGARE" a lettere spaziate)
 - Browser: dalla cartella sopra `python3 -m http.server 8765` → `http://localhost:8765/moneyflow/`
 
 ## File principali
 `js/money.js` (centesimi, quantità 1e-8, `tradeEuroCents`, percentuali in punti base), `js/dates.js` (date locali, periodi D8), `js/recurrence.js`, `js/store.js` (modello, validazione, tombstone), `js/calc.js` (aggregati puri), `js/csv.js`, `js/backup.js`, `js/sync.js` (+ `js/firebase-config.js`), `js/prefs.js`, `js/theme-boot.js`, `js/ui.js`, `js/charts.js`, `js/icons.js`, `js/app.js` (router, SW, banner), `js/views/*.js` (una vista per schermata; `parts.js` pezzi condivisi; `movimento-form.js` tutti i fogli di inserimento, compresi Compra/Vendi e il modulo busta paga).
 Nuovi in v2: `js/tax-tables.js` (scaglioni e detrazioni per anno, solo dati: per un anno nuovo aggiungere una voce), `js/tax.js` (stima IRPEF, conguaglio, addizionali), `js/tax-settings.js` (impostazioni della stima), `js/pension.js` (simulatore fondo pensione), `js/pdf-text.js` (lettore PDF minimo: FlateDecode con `DecompressionStream`, object stream, ToUnicode), `js/payslip.js` (voci della busta: I01, I21, 900, 60450, riga Ferie, NETTO A PAGARE, mese/anno), `js/views/metti-da-parte.js`, `js/views/fondo-pensione.js`.
+
+Nuovi in v4: `js/period.js` (periodo di budget, `remaining`), `js/interest.js` (formula degli interessi documentata, `accrueInterest`, `reconcileInterest`), `js/csv-import.js` (lettura CSV, Revolut, generico, doppioni, `suggestCategory`), `js/routes.js` (router puro), `js/views/budget.js`, `js/views/importa.js`. `calendario.js` esporta `renderCalendar` (vista di Movimenti). Fixture `tests/fixtures/data-v2.json` e `data-v3.json` (generate con lo store pubblicato) e `estratto-revolut-prova.csv`.
 
 ## Design v3 (colori)
 Smeraldo = colore principale (azioni, +, scheda attiva, Patrimonio, Conti, Da ricevere, entrate); grigi neutri iOS (`--bg #F2F2F7`/`#000000`). Colori complementari in `css/app.css`, ognuno con testo, pieno (`-fill`, testo bianco) e tenue opaco (`-soft`): laguna `--teal` (mese, periodo, grafici per mese, linea del patrimonio), indaco `--indigo` (stipendio e tasse, fondo pensione), viola `--violet` (programmati, da confermare), ambra `--amber` (budget, uscite per categoria, Compra/Vendi), magenta `--pink` (obiettivi, Metti da parte). `card({ tint, icon, color })` mette la tinta e il riquadro col glifo nell'intestazione; `section({ cls: 'section--t-<tinta>' })` colora l'intestazione. Verde/rosso dei valori e colori di conti e categorie invariati. Contrasti WCAG calcolati nella specifica `/projects/sandbox/.agents/tasks/moneyflow-v3/SPEC.md` (fuori dal repository).
@@ -28,18 +30,29 @@ Smeraldo = colore principale (azioni, +, scheda attiva, Patrimonio, Conti, Da ri
 - `moneyflow:sync` — apiKey, projectId, email, uid, token, cursore, `dirty`, ultimo esito (mai la password)
 - `moneyflow:data:corrupt-<ms>` — copia grezza di dati illeggibili; `moneyflow:data:before-import-<ms>` — copia prima di un'importazione
 
-## Modello dati (schemaVersion 1; la v2 aggiunge solo campi facoltativi)
+## Modello dati (schemaVersion 1; v2 e v4 aggiungono solo campi facoltativi)
 Ogni record: `id`, `createdAt`, `updatedAt` (ms), `deleted`. Importi interi: centesimi per l'euro, unità 1e-8 per le crypto.
 - account: `name` (unico), `kind` 'eur'|'crypto', `asset` (crypto), `initial`, `color`, `order`
 - category: `name` (unico per tipo), `type` 'uscita'|'entrata', `color`, `budget` (uscite), `role` ('stipendio'), `order`
 - movement: `type` uscita|entrata|trasferimento|restituzione|variazione, `date`, `amount` (variazione con segno), `accountId`, `toAccountId`, `amountTo` (solo se unità diverse), `categoryId`, `description`, `note`, `excluded` (uscita), `refundOf` (restituzione → uscita), `gross` (entrata: Competenze lorde, era il "Lordo" della v1), `scheduledId`, `occurrence`; v2: `trade` 'compra'|'vendi'|null e `price` (centesimi per 1 unità intera) sui trasferimenti euro↔crypto (Compra: euro → crypto, `amount` euro, `amountTo` quantità; Vendi: il contrario), `payslip` `{ contributions, taxable, irpef, pension, deductions }` (centesimi o null; null se tutto vuoto) sulle entrate
 - scheduled: `type` uscita|entrata|trasferimento, `amount`, conti, `categoryId`, `description`, `start`, `freq` once|weekly|monthly|months|yearly, `interval`, `end`, `handled` `{data: 'confermato'|'saltato'}`
+- v4 (tutti facoltativi, assenti = comportamento v3): account `icon` (nome di `PICK_ICONS` o null), `deposit` `{ start, withholdingBp (default 2600), rates: [{ from, rateBp }] }` (solo euro); category `icon`, `role` anche 'interessi' (id fisso `default-entrata-interessi`, creata da `upsertDerived` se manca); movement `split` `[{ person, amount }]` (uscita: `excluded` = somma), `person` (restituzione), `interest` `{ accountId, month }` (entrata automatica, id `interest-<conto>-<AAAA-MM>`), `align` `{ balance }` (variazione su conto euro, id `align-<conto>-<data>`, importo ricalcolato dal motore; letta anche se in tombstone), `importKey` (uscita/entrata importate da CSV). Operazioni atomiche dello store: `upsertDerived` (nessun commit se nulla cambia), `addMovements`, `settlePerson`.
 - goal: `name`, `target`, `saved`, `deadline`, `color`; v2: `monthly` (quota mensile, facoltativa) e `log` `{ 'AAAA-MM': centesimi con segno }` (aggiunte/tolte per mese). "Completato" = `saved ≥ target` (derivato)
 
 Regole di calcolo: uscita contata = `amount − excluded` (anche nel CSV dalla v2); cash flow del mese in Home = entrate contate − uscite contate; entrate contate = solo `entrata`; trasferimenti, restituzioni e variazioni non contano mai negli aggregati; tasso di risparmio in decimi interi (entrate 0 → 0). Conti eliminati fuori dal patrimonio, i loro movimenti restano nelle statistiche. Evoluzione: solo campi facoltativi; per dati nuovi chiavi nuove; fixture `tests/fixtures/data-v1.json` da caricare identica.
 
-## Rotte
-`#home`, `#da-confermare`, `#da-ricevere`, `#programmati[/<id>]`, `#movimenti?periodo=&da=&a=&conto=&categoria=&q=`, `#calendario?mese=&giorno=`, `#statistiche?periodo=`, `#statistiche/stipendio?anno=`, `#conti`, `#conti/obiettivi`, `#conti/<id>`, `#obiettivi/<id>`, `#impostazioni[/tema|categorie|budget|backup|csv|sync|installa|fondo-pensione]`. Sconosciute → `#home`.
+## Rotte (v4, `js/routes.js`)
+`#home`, `#da-confermare`, `#da-ricevere[?persona=]`, `#programmati[/<id>]`, `#movimenti?periodo=&da=&a=&conto=&categoria=&q=`, `#movimenti?vista=calendario&mese=&giorno=`, `#budget`, `#budget/obiettivi`, `#obiettivi/<id>`, `#statistiche?periodo=`, `#statistiche/stipendio?anno=`, `#statistiche/fondo-pensione`, `#conti`, `#conti/<id>`, `#impostazioni[/tema|categorie|budget|periodo|backup|csv|importa|sync|installa]`.
+Reindirizzate con la query: `#calendario` → `#movimenti?vista=calendario`, `#conti/obiettivi` e `#obiettivi` → `#budget/obiettivi`, `#impostazioni/fondo-pensione` → `#statistiche/fondo-pensione`. Sconosciute → `#home`.
+
+## Scelte provvisorie della v4 (da confermare con l'utente)
+- Quanto ti resta = entrate contate − uscite contate − uscite programmate non gestite del periodo (anche scadute); entrate programmate non contate. Puoi spendere oggi = rimanente / giorni fino alla fine compresi, per difetto; 0 se ≤ 0.
+- Periodo di budget: preferenza del dispositivo (`prefs.budgetPeriod`, predefinito 'calendar'); 'salary' = dall'ultimo stipendio al giorno prima del successivo, fine stimata "+1 mese − 1 giorno", in ritardo fino a oggi; senza stipendi mese di calendario. Il budget di categoria vale per periodo. Statistiche e CSV a mesi.
+- Interessi: dalla data di inizio a ieri sul saldo di fine giornata, base 365, ritenuta per giorno, accredito a 0,01 €, capitalizzazione giornaliera; un movimento Interessi (entrata) per mese per conto, data = ultimo giorno maturato; rettifica "Allinea al saldo reale" = variazione che non conta negli aggregati, "Rettifica saldo" nel CSV. Togliendo il deposito i movimenti già creati restano.
+- Spesa divisa: persone solo come nomi sulla spesa, unite senza maiuscole; quote senza nome dei dati v1–v3 = "Senza nome"; nessun importo suggerito ("Dividi in parti uguali" non realizzato, D4).
+- Import CSV: Revolut = data di completamento, Amount − Fee, solo COMPLETED in EUR; intestazioni italiane non verificate. Doppione = stessa importKey o stessa data ed effetto di un movimento senza importKey (uno a uno). Categoria dal movimento passato con la stessa descrizione.
+- Netto dal PDF: Form XObject letti (`Do`), etichetta senza spazi, numeri spezzati uniti, scelta del candidato uguale a competenze − ritenute (± 1,00 €); senza etichetta netto calcolato con avviso.
+- Fondo pensione in Statistiche, collegamento in Impostazioni → Strumenti. Patrimonio in Home solo come riga; il totale grande è in Conti.
 
 ## Scelte provvisorie della v2 (da richiedere all'utente)
 - P1 `schemaVersion` resta 1: solo campi facoltativi, così la v1 legge i dati e i backup della v2 (e conserva i campi che non conosce).
@@ -83,6 +96,7 @@ Respinti dall'utente (non riproporre): 7 pulsante "Tutto" sulla restituzione (re
 Altre scelte tecniche: niente `preventDefault` su `beforeinstallprompt` (resta il banner di Chrome, più il pulsante Installa nelle Impostazioni); conferma di un programmato precompila l'importo scritto nel programmato (D18), voci recenti e restituzioni no (D4).
 
 ## Cosa non è stato provato
+- v4: CSV vero di Revolut (intestazione italiana in particolare), PDF reale della busta (il caso a modulo è riprodotto solo con un PDF sintetico), interessi confrontati con un estratto Revolut vero.
 - **Icona v3 su un telefono vero:** provati solo manifest letto da Chrome headless e dimensioni dei PNG; l'aggiornamento dell'icona di un'app già installata (Android WebAPK, iPhone) non è provato.
 - **PDF reale della busta paga:** non è nella sandbox. Il lettore è provato solo con due PDF sintetici (dati inventati) generati da `tools/make_payslip_pdf.py`, con il testo simile alle righe descritte nelle decisioni v2. Va provato dall'utente sul telefono.
 - Formule fiscali: provate su esempi calcolati a mano (`tests/tax.test.js`, `tests/pension.test.js`), non confrontate con una CU o un 730 veri.

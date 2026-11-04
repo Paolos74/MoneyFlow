@@ -243,3 +243,82 @@ test('v2 Compra/Vendi: etichetta', () => {
   assert.equal(C.tradeLabel(state, { ...m, trade: 'vendi', accountId: 'b', toAccountId: 'e' }), 'Vendi BTC');
   assert.equal(C.isTrade({ type: 'trasferimento', trade: null }), false);
 });
+
+// Valori calcolati dal codice v3 (a730f75) sulle fixture v2 e v3: devono restare uguali.
+for (const v of ['v2', 'v3']) {
+  test(`fixture ${v}: saldi, patrimonio, totali, crediti e stipendi come nella v3`, () => {
+    const raw = readFileSync(new URL(`./fixtures/data-${v}.json`, import.meta.url), 'utf8');
+    const store = createStore({ storage: memoryStorage({ 'moneyflow:data': raw }), now: clock(), uuid: seqUuid() });
+    const s = store.getState();
+    const id = (n) => `${v}-${String(n).padStart(4, '0')}`;
+    assert.deepEqual([...C.balances(s)], [[id(1), 533151], [id(2), 11700], [id(3), 800], [id(4), 1649000]]);
+    assert.deepEqual(C.netWorth(s), { eurCents: 544851, crypto: [{ asset: 'BTC', units: 1649000 }] });
+    assert.deepEqual(C.totals(s, '2026-02-01', '2026-02-28'), { income: 205000, expense: 11550, net: 193450, rate: 944 });
+    const oc = C.openCredits(s);
+    assert.equal(oc.total, 3500);
+    assert.deepEqual(oc.items.map((i) => [i.movement.id, i.residual]), [[id(8), 3500]]);
+    const y = C.salaryYear(s, 2026);
+    assert.deepEqual([y.net, y.gross, y.withheld, y.missing, y.taxable, y.irpef], [415000, 300000, 90000, 1, 273000, 52000]);
+    assert.deepEqual(y.months, [{ ym: '2026-01', taxable: 273000, irpef: 52000 }]);
+  });
+}
+
+test('v4 spesa divisa: 90,00 tra Anna 30,00 e Luca 30,00, restituzioni per persona', () => {
+  const { store, cat, eur, now } = world();
+  const e = store.addMovement({ type: 'uscita', date: '2026-03-01', amount: 9000, accountId: eur.id, categoryId: cat('uscita', 'Ristoranti'), split: [{ person: 'Anna', amount: 3000 }, { person: 'Luca', amount: 3000 }] });
+  let s = store.getState();
+  assert.equal(e.excluded, 6000);
+  assert.equal(C.totals(s, '2026-03-01', '2026-03-31').expense, 3000, 'contata 30,00');
+  assert.equal(C.accountBalance(s, eur.id), 10000 - 9000);
+  now.advance(10);
+  store.addMovement({ type: 'restituzione', date: '2026-03-02', amount: 3000, accountId: eur.id, refundOf: e.id, person: 'Anna' });
+  store.addMovement({ type: 'restituzione', date: '2026-03-03', amount: 1000, accountId: eur.id, refundOf: e.id, person: 'Luca' });
+  s = store.getState();
+  assert.deepEqual(C.personShares(s, e).map((p) => [p.person, p.share, p.refunded, p.residual]), [['Anna', 3000, 3000, 0], ['Luca', 3000, 1000, 2000]]);
+  assert.deepEqual(C.debtsByPerson(s).map((d) => [d.person, d.residual, d.items.length]), [['Luca', 2000, 1]]);
+  assert.equal(C.openCredits(s).total, 2000, 'openCredits resta il totale per spesa');
+  assert.equal(C.accountBalance(s, eur.id), 10000 - 9000 + 4000);
+  assert.equal(C.totals(s, '2026-03-01', '2026-03-31').expense, 3000, 'le restituzioni non cambiano il conteggio');
+});
+
+test('v4 chi mi deve: nomi "luca" e "Luca" uniti, ordinati per residuo', () => {
+  const { store, cat, eur, now } = world();
+  const r = cat('uscita', 'Ristoranti');
+  store.addMovement({ type: 'uscita', date: '2026-03-01', amount: 9000, accountId: eur.id, categoryId: r, split: [{ person: 'Luca', amount: 3000 }, { person: 'Anna', amount: 1000 }] });
+  now.advance(10);
+  store.addMovement({ type: 'uscita', date: '2026-03-05', amount: 5000, accountId: eur.id, categoryId: r, split: [{ person: 'luca', amount: 2500 }] });
+  const d = C.debtsByPerson(store.getState());
+  assert.deepEqual(d.map((x) => [x.person, x.residual, x.items.length]), [['Luca', 5500, 2], ['Anna', 1000, 1]]);
+  assert.equal(d[0].items[0].movement.date, '2026-03-05');
+  assert.equal(C.debtOf(store.getState(), 'LUCA').residual, 5500);
+  assert.deepEqual(C.knownPeople(store.getState()), ['Anna', 'Luca']);
+});
+
+test('v4 spesa v1 con solo excluded → voce "Senza nome"', () => {
+  const { store, cat, eur } = world();
+  const e = store.addMovement({ type: 'uscita', date: '2026-03-01', amount: 4000, excluded: 2000, accountId: eur.id, categoryId: cat('uscita', 'Ristoranti') });
+  store.addMovement({ type: 'restituzione', date: '2026-03-02', amount: 500, accountId: eur.id, refundOf: e.id });
+  const s = store.getState();
+  assert.deepEqual(C.personShares(s, e), [{ person: null, share: 2000, refunded: 500, residual: 1500 }]);
+  assert.deepEqual(C.debtsByPerson(s), []);
+  // spesa divisa modificata da una v3 (excluded 50,00, quote 30,00): 20,00 senza nome
+  const raw = { ...store.find('movement', e.id), id: 'v3x', amount: 9000, excluded: 5000, split: [{ person: 'Anna', amount: 3000 }] };
+  const s2 = { ...s, movements: [...s.movements, raw] };
+  assert.deepEqual(C.personShares(s2, raw).map((p) => [p.person, p.residual]), [['Anna', 3000], [null, 2000]]);
+});
+
+test('v4 icone predefinite di categorie e conti', () => {
+  const { store, eur } = world();
+  const s = store.getState();
+  assert.equal(C.categoryIcon(s, 'default-uscita-casa'), 'house');
+  assert.equal(C.categoryIcon(s, 'default-entrata-interessi'), 'percent');
+  assert.equal(C.categoryIcon(s, 'manca'), 'tag');
+  const c = store.addCategory({ name: 'Gatto', type: 'uscita', color: PALETTE[0] });
+  assert.equal(C.categoryIcon(store.getState(), c.id), 'tag');
+  store.updateCategory(c.id, { icon: 'paw' });
+  assert.equal(C.categoryIcon(store.getState(), c.id), 'paw');
+  assert.equal(C.accountIcon(eur), 'bank');
+  assert.equal(C.accountIcon({ kind: 'crypto' }), 'coin');
+  assert.equal(C.accountIcon({ kind: 'eur', deposit: { start: '2026-01-01' } }), 'vault');
+  assert.equal(C.accountIcon({ kind: 'eur', icon: 'piggy' }), 'piggy');
+});

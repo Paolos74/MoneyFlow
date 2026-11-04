@@ -11,12 +11,12 @@ import { openGoalForm } from './conti.js';
 export function render(root, ctx) {
   const g = ctx.store.find('goal', ctx.path[1]);
   if (!g || g.deleted) {
-    ctx.header({ title: 'Obiettivo', back: { href: '#conti/obiettivi', label: 'Obiettivi' } });
+    ctx.header({ title: 'Obiettivo', back: { href: '#budget/obiettivi', label: 'Obiettivi' } });
     root.append(emptyState({ icon: 'target', title: 'Obiettivo non trovato' }));
     return;
   }
   const p = C.goalProgress(g, ctx.today());
-  ctx.header({ title: g.name, back: { href: '#conti/obiettivi', label: 'Obiettivi' }, actions: [el('button', { class: 'topbar__btn', type: 'button', text: 'Modifica', id: 'goal-edit', on: { click: () => openGoalForm(ctx, g) } })] });
+  ctx.header({ title: g.name, back: { href: '#budget/obiettivi', label: 'Obiettivi' }, actions: [el('button', { class: 'topbar__btn', type: 'button', text: 'Modifica', id: 'goal-edit', on: { click: () => openGoalForm(ctx, g) } })] });
   root.append(card({ title: 'Messo da parte', tint: 'pink', icon: 'target', link: p.done ? el('span', { class: 'tag tag--done', id: 'goal-done', text: 'Completato ✓' }) : null },
     el('p', { class: 'hero__value', id: 'goal-saved', text: formatEuro(g.saved) }),
     el('p', { class: 'hero__sub', text: `di ${formatEuro(g.target)} · ${formatPercent(p.pct)}` }),
@@ -31,7 +31,7 @@ export function render(root, ctx) {
     button('Aggiungi', () => adjust(ctx, g, 1), { kind: 'pink', icon: 'plus', id: 'goal-add' }),
     button('Togli', () => adjust(ctx, g, -1), { kind: 'pink-soft', id: 'goal-remove', disabled: g.saved === 0 })));
   root.append(el('div', { class: 'section' }, list(el('button', { type: 'button', class: 'row row--danger row--noicon', id: 'goal-delete', text: 'Elimina obiettivo', on: { click: () => {
-    if (attempt(() => ctx.store.deleteGoal(g.id))) { ctx.go('conti/obiettivi'); toast('Obiettivo eliminato', { undo: () => ctx.store.restoreGoal(g.id) }); }
+    if (attempt(() => ctx.store.deleteGoal(g.id))) { ctx.go('budget/obiettivi'); toast('Obiettivo eliminato', { undo: () => ctx.store.restoreGoal(g.id) }); }
   } } }))));
 }
 

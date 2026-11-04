@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
-# Genera due PDF di busta paga SINTETICI (dati inventati, nessun dato reale) per i test del lettore PDF.
-# Solo libreria standard (zlib). Uscita: tests/fixtures/busta-paga-sintetica.pdf (font standard, FlateDecode)
-# e busta-paga-sintetica-cid.pdf (font Type0 Identity-H con ToUnicode e object stream: serve solo a provare il lettore).
+# Genera tre PDF di busta paga SINTETICI (dati inventati, nessun dato reale) per i test del lettore PDF.
+# Solo libreria standard (zlib). Uscita: tests/fixtures/busta-paga-sintetica.pdf (font standard, FlateDecode),
+# busta-paga-sintetica-cid.pdf (font Type0 Identity-H con ToUnicode e object stream: serve solo a provare il lettore)
+# e busta-paga-sintetica-modulo.pdf (modulo prestampato: etichette fisse in un Form XObject separato dai valori,
+# "NETTO A PAGARE" scritto una lettera alla volta come nei moduli a caratteri fissi).
 import os
 import zlib
 
@@ -158,8 +160,76 @@ def make_cid():
         f.write(data)
 
 
+# Etichette fisse del modulo (coordinate della pagina): stanno nel Form XObject, non nel content stream.
+FORM_LABELS = [
+    (770, 40, 'Descrizione voce (dati inventati)'),
+    (610, 40, ['Imp.fiscale', 'Impos.lorda', 'Detr.godute', 'Impos.netta', 'Imp. Prev.', 'Ctr. FPC', 'Ctr. F.Ass.']),
+]
+FORM_SHIFT = 10  # il form ha /Matrix [1 0 0 1 0 10]: dentro il form le y sono 10 punti più in basso
+
+
+def form_content():
+    out = ['BT', '/F1 9 Tf']
+    for y, x, text in FORM_LABELS:
+        if isinstance(text, list):
+            for i, t in enumerate(text):
+                out.append(f'1 0 0 1 {x + 60 * i} {y - FORM_SHIFT} Tm')
+                out.append(lit(t) + ' Tj')
+        else:
+            out.append(f'1 0 0 1 {x} {y - FORM_SHIFT} Tm')
+            out.append(lit(text) + ' Tj')
+    # "NETTO A PAGARE" una lettera per volta, ognuna con il suo Td (spazio tra le parole = passo doppio).
+    x, y, label = NET_LABEL
+    out.append(f'1 0 0 1 {x} {y - FORM_SHIFT} Tm')
+    step = 0
+    for c in label:
+        if c == ' ':
+            step += 6
+            continue
+        if step:
+            out.append(f'{step} 0 Td')
+        out.append(lit(c) + ' Tj')
+        step = 6
+    out.append('ET')
+    return ('\n'.join(out) + '\n').encode('latin-1')
+
+
+def form_page_content():
+    """Valori stampati sopra il modulo: le righe di LINES senza le etichette del form, e il netto sotto l'etichetta."""
+    fixed = {y for y, _, _ in FORM_LABELS}
+    out = ['q 1 0 0 1 0 0 cm /Fm1 Do Q', 'BT', '/F1 9 Tf']
+    for y, pieces in LINES:
+        if y in fixed:
+            continue
+        for x, text in pieces:
+            out.append(f'1 0 0 1 {x} {y} Tm')
+            if isinstance(text, list):
+                parts = [lit(p) if isinstance(p, str) else str(p) for p in text]
+                out.append('[' + ' '.join(parts) + '] TJ')
+            else:
+                out.append(lit(text) + ' Tj')
+    x, y, _ = NET_LABEL
+    out.append(f'1 0 0 1 {x} {y - 14} Tm')
+    out.append(lit(NET_VALUE) + ' Tj')
+    out.append('ET')
+    return ('\n'.join(out) + '\n').encode('latin-1')
+
+
+def make_form():
+    objects = [
+        b'<< /Type /Catalog /Pages 2 0 R >>',
+        b'<< /Type /Pages /Kids [3 0 R] /Count 1 >>',
+        b'<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 4 0 R >> /XObject << /Fm1 6 0 R >> >> /Contents 5 0 R >>',
+        b'<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>',
+        stream('', form_page_content()),
+        stream(f'/Type /XObject /Subtype /Form /BBox [0 0 595 842] /Matrix [1 0 0 1 0 {FORM_SHIFT}] /Resources << /Font << /F1 4 0 R >> >>', form_content()),
+    ]
+    write_classic(os.path.join(OUT, 'busta-paga-sintetica-modulo.pdf'), objects)
+
+
 if __name__ == '__main__':
     os.makedirs(OUT, exist_ok=True)
     make_simple()
     make_cid()
-    print('Creati tests/fixtures/busta-paga-sintetica.pdf e busta-paga-sintetica-cid.pdf (dati inventati)')
+    make_form()
+    print('Creati tests/fixtures/busta-paga-sintetica.pdf, busta-paga-sintetica-cid.pdf e busta-paga-sintetica-modulo.pdf (dati inventati)')

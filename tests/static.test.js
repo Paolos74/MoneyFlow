@@ -23,7 +23,7 @@ function walk(dir) {
 const published = walk(ROOT).filter((f) => !NOT_PUBLISHED_FILES.includes(f)).sort();
 const sw = readFileSync(join(ROOT, 'sw.js'), 'utf8');
 const assets = JSON.parse(sw.match(/const ASSETS = (\[[\s\S]*?\]);/)[1].replace(/'/g, '"').replace(/,\s*\]/, ']'));
-const textFiles = published.filter((f) => /\.(js|html|css|webmanifest|json)$/.test(f));
+const textFiles = published.filter((f) => /\.(js|html|css|webmanifest|json|svg)$/.test(f));
 const read = (f) => readFileSync(join(ROOT, f), 'utf8');
 
 test('ASSETS coincide con i file pubblicati nei due sensi', () => {
@@ -60,17 +60,24 @@ test('manifest valido con i campi di §7', () => {
   for (const i of m.icons) assert.ok(published.includes(i.src), i.src);
 });
 
-test('dimensioni delle icone (header IHDR)', () => {
-  const want = { 'icons/moneyflow-v3-192.png': 192, 'icons/moneyflow-v3-512.png': 512, 'icons/moneyflow-v3-maskable-512.png': 512, 'icons/moneyflow-v3-apple-touch-180.png': 180, 'icons/moneyflow-v3-favicon-32.png': 32 };
+test('dimensioni delle icone (header IHDR) e favicon v4 collegate', () => {
+  const want = { 'icons/moneyflow-v4-192.png': 192, 'icons/moneyflow-v4-512.png': 512, 'icons/moneyflow-v4-maskable-512.png': 512, 'icons/moneyflow-v4-apple-touch-180.png': 180, 'icons/moneyflow-v4-favicon-32.png': 32 };
   for (const [f, size] of Object.entries(want)) {
     const b = readFileSync(join(ROOT, f));
     assert.equal(b.toString('latin1', 1, 4), 'PNG', f);
     assert.equal(b.readUInt32BE(16), size, f);
     assert.equal(b.readUInt32BE(20), size, f);
   }
-  const html = read('index.html');
-  assert.match(html, /rel="apple-touch-icon"[^>]*href="icons\/moneyflow-v3-apple-touch-180.png"/);
-  assert.match(html, /rel="icon"[^>]*href="icons\/moneyflow-v3-favicon-32.png"/);
+  for (const page of ['index.html', 'offline.html']) {
+    const html = read(page);
+    assert.match(html, /rel="icon" type="image\/svg\+xml" href="icons\/moneyflow-v4-favicon.svg"/, page);
+    assert.match(html, /rel="icon" type="image\/png" sizes="32x32" href="icons\/moneyflow-v4-favicon-32.png"/, page);
+  }
+  assert.match(read('index.html'), /rel="apple-touch-icon"[^>]*href="icons\/moneyflow-v4-apple-touch-180.png"/);
+  for (const f of ['icons/moneyflow-v4.svg', 'icons/moneyflow-v4-favicon.svg']) assert.match(read(f), /^<svg xmlns="http:\/\/www.w3.org\/2000\/svg" viewBox="0 0 512 512">/, f);
+  // Le icone v3 non esistono più e nessun file le cita (vanno cancellate su GitHub).
+  assert.deepEqual(published.filter((f) => f.includes('moneyflow-v3-')), []);
+  for (const f of textFiles) assert.ok(!read(f).includes('moneyflow-v3-'), f);
 });
 
 test('nessun riferimento vietato nei file pubblicati e nella documentazione', () => {

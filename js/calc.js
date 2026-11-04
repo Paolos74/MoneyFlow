@@ -36,6 +36,32 @@ export function categoryColor(state, id) {
   return byId(state.categories, id)?.color || NEUTRAL_COLOR;
 }
 
+// Icone di categorie e conti (v4): quella scelta (campo `icon`) oppure la predefinita.
+// Categorie iniziali per id fisso; le altre 'tag'. Conti: deposito 'vault', crypto 'coin', euro 'bank'.
+const DEFAULT_CATEGORY_ICONS = {
+  'default-uscita-casa': 'house', 'default-uscita-spesa': 'cart', 'default-uscita-trasporti': 'car',
+  'default-uscita-bollette': 'bolt', 'default-uscita-abbonamenti': 'repeat', 'default-uscita-salute': 'heart',
+  'default-uscita-svago': 'ticket', 'default-uscita-ristoranti': 'fork', 'default-uscita-regali': 'gift',
+  'default-uscita-altro': 'tag', 'default-entrata-stipendio': 'briefcase', 'default-entrata-rimborsi': 'return',
+  'default-entrata-altro': 'tag', 'default-entrata-interessi': 'percent',
+};
+
+export function categoryIconOf(cat) {
+  if (!cat) return 'tag';
+  return cat.icon || DEFAULT_CATEGORY_ICONS[cat.id] || (cat.role === 'interessi' ? 'percent' : cat.role === 'stipendio' ? 'briefcase' : 'tag');
+}
+
+export function categoryIcon(state, id) {
+  return categoryIconOf(byId(state.categories, id));
+}
+
+export function accountIcon(account) {
+  if (!account) return 'bank';
+  if (account.icon) return account.icon;
+  if (account.kind === 'crypto') return 'coin';
+  return account.deposit ? 'vault' : 'bank';
+}
+
 // Colore che rappresenta un movimento (categoria, oppure conto per trasferimenti e variazioni).
 export function movementColor(state, m) {
   if (m.type === 'uscita' || m.type === 'entrata') return categoryColor(state, m.categoryId);
@@ -149,9 +175,10 @@ export function byMonth(state, months) {
   return months.map((ym) => ({ month: ym, ...totals(state, monthStart(ym), monthEnd(ym)) }));
 }
 
-export function budgetStatus(state, ym) {
-  const from = monthStart(ym);
-  const to = monthEnd(ym);
+// Budget per categoria: `range` è un mese 'YYYY-MM' oppure un periodo { from, to } (periodo dallo stipendio, v4).
+export function budgetStatus(state, range) {
+  const from = typeof range === 'string' ? monthStart(range) : range.from;
+  const to = typeof range === 'string' ? monthEnd(range) : range.to;
   return live(state.categories)
     .filter((c) => c.type === 'uscita' && c.budget)
     .sort((a, b) => (a.order - b.order) || a.createdAt - b.createdAt)
@@ -185,6 +212,62 @@ export function openCredits(state) {
 
 export function residualOf(state, expense) {
   return (expense.excluded || 0) - refundedOf(state, expense.id);
+}
+
+const lowerName = (s) => String(s).trim().toLocaleLowerCase('it');
+
+// Spesa divisa (v4): per ogni persona di `split` { person, share, refunded, residual } (restituzioni con quel nome).
+// Una voce person: null ("Senza nome") raccoglie quota esclusa − somma delle quote (dati v1–v3 o spese modificate
+// da una v3) e le restituzioni senza nome, quando non è zero. Residui mai negativi.
+export function personShares(state, expense) {
+  const split = Array.isArray(expense.split) ? expense.split : [];
+  const refunds = refundsOf(state, expense.id);
+  const rows = split.map((x) => ({ person: x.person, share: x.amount, refunded: 0, residual: 0 }));
+  const idx = new Map(rows.map((r, i) => [lowerName(r.person), i]));
+  const none = { person: null, share: Math.max(0, (expense.excluded || 0) - split.reduce((t, x) => t + x.amount, 0)), refunded: 0, residual: 0 };
+  for (const r of refunds) {
+    const i = r.person ? idx.get(lowerName(r.person)) : undefined;
+    if (i === undefined) none.refunded += r.amount; else rows[i].refunded += r.amount;
+  }
+  if (none.share || none.refunded) rows.push(none);
+  for (const r of rows) r.residual = Math.max(0, r.share - r.refunded);
+  return rows;
+}
+
+// "Chi mi deve": residui per persona su tutte le spese non eliminate, nomi uniti senza maiuscole,
+// dal residuo più alto. items = [{ movement, share, refunded, residual }] con residuo > 0.
+export function debtsByPerson(state) {
+  const map = new Map();
+  for (const m of state.movements) {
+    if (m.deleted || m.type !== 'uscita' || !Array.isArray(m.split) || !m.split.length) continue;
+    for (const p of personShares(state, m)) {
+      if (p.person === null || p.residual <= 0) continue;
+      const k = lowerName(p.person);
+      const cur = map.get(k) || { person: p.person, residual: 0, items: [] };
+      cur.residual += p.residual;
+      cur.items.push({ movement: m, share: p.share, refunded: p.refunded, residual: p.residual });
+      map.set(k, cur);
+    }
+  }
+  for (const d of map.values()) d.items.sort((a, b) => b.movement.date.localeCompare(a.movement.date) || b.movement.createdAt - a.movement.createdAt);
+  return [...map.values()].sort((a, b) => b.residual - a.residual || a.person.localeCompare(b.person, 'it'));
+}
+
+// Persona di "Chi mi deve" dal nome (senza maiuscole), oppure null.
+export function debtOf(state, name) {
+  const k = lowerName(name || '');
+  return debtsByPerson(state).find((d) => lowerName(d.person) === k) || null;
+}
+
+// Nomi già usati nelle spese divise e nelle restituzioni (per il suggerimento dei nomi, mai gli importi).
+export function knownPeople(state) {
+  const seen = new Map();
+  for (const m of state.movements) {
+    if (m.deleted) continue;
+    const names = m.type === 'uscita' && Array.isArray(m.split) ? m.split.map((x) => x.person) : m.type === 'restituzione' && m.person ? [m.person] : [];
+    for (const n of names) if (!seen.has(lowerName(n))) seen.set(lowerName(n), n);
+  }
+  return [...seen.values()].sort((a, b) => a.localeCompare(b, 'it'));
 }
 
 // Avanzamento obiettivo. Quota mensile: quella scelta dall'utente (v2, `monthly`); se manca,

@@ -10,5 +10,5 @@
   root.setAttribute('data-theme', theme);
   var dark = theme === 'dark' || (theme === 'auto' && window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches);
   var meta = document.querySelector('meta[name="theme-color"]');
-  if (meta) meta.setAttribute('content', dark ? '#000000' : '#F2F2F7');
+  if (meta) meta.setAttribute('content', dark ? '#0C0D0F' : '#F6F5F1');
 })();

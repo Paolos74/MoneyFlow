@@ -1,7 +1,7 @@
-// Impostazioni: tema, categorie, budget, backup, esportazione CSV, sincronizzazione Firebase,
-// strumenti (simulatore fondo pensione), istruzioni per installare l'app su Android e iPhone, versione.
+// Impostazioni: tema, categorie, budget, periodo di budget (v4), backup, esportazione e importazione CSV,
+// sincronizzazione Firebase, strumenti (collegamento al fondo pensione, ora in Statistiche), installazione, versione.
 
-import { el, list, row, section, segmented, sheet, field, input, colorPicker, toast, button, confirmDialog, shareOrDownload, attempt, card } from '../ui.js';
+import { el, list, row, section, segmented, sheet, field, input, colorPicker, iconPicker, toast, button, confirmDialog, shareOrDownload, attempt, card } from '../ui.js';
 import { formatEuro, parseEuroInput, formatEuroPlain } from '../money.js';
 import { formatDateIt, todayISO } from '../dates.js';
 import { ValidationError, StorageError } from '../errors.js';
@@ -10,19 +10,21 @@ import { createBackup, parseBackup, backupFileName, backupSummary } from '../bac
 import { buildCsv, csvFileName, CSV_FORMATS } from '../csv.js';
 import * as C from '../calc.js';
 import { periodPicker } from './parts.js';
-import { render as fondoPensione } from './fondo-pensione.js';
+import { render as importa } from './importa.js';
 
 const SECTIONS = {
   tema: { title: 'Tema', icon: 'sun', color: 'var(--amber-fill)' },
   categorie: { title: 'Categorie', icon: 'tag', color: 'var(--pink-fill)' },
   budget: { title: 'Budget', icon: 'gauge', color: 'var(--amber-fill)' },
+  periodo: { title: 'Periodo di budget', icon: 'calendar', color: 'var(--teal-fill)' },
   backup: { title: 'Backup', icon: 'download', color: '#2563EB' },
   csv: { title: 'Esporta CSV', icon: 'doc', color: 'var(--teal-fill)' },
+  importa: { title: 'Importa movimenti (CSV)', icon: 'upload', color: 'var(--teal-fill)' },
   sync: { title: 'Sincronizzazione', icon: 'cloud', color: 'var(--indigo-fill)' },
   installa: { title: 'Installa l\'app', icon: 'phone', color: 'var(--accent-fill)' },
-  // Scelta provvisoria: il simulatore sta in Impostazioni → Strumenti (la schermata "Altro" non esiste).
-  'fondo-pensione': { title: 'Se aumento il fondo pensione', icon: 'coin', color: 'var(--indigo-fill)' },
 };
+// Dalla v4 il simulatore sta in Statistiche (#statistiche/fondo-pensione); qui resta solo il collegamento.
+const PENSION = { title: 'Se aumento il fondo pensione', icon: 'coin', color: 'var(--indigo-fill)' };
 
 let csvPeriod = null;
 let syncDraft = null;
@@ -32,7 +34,7 @@ export function render(root, ctx) {
   const sec = ctx.path[1];
   if (sec && SECTIONS[sec]) {
     ctx.header({ title: SECTIONS[sec].title, back: { href: '#impostazioni', label: 'Impostazioni' } });
-    ({ tema, categorie, budget, backup, csv, sync, installa, 'fondo-pensione': fondoPensione })[sec](root, ctx);
+    ({ tema, categorie, budget, periodo, backup, csv, importa, sync, installa })[sec](root, ctx);
     return;
   }
   ctx.header({ title: 'Impostazioni', back: { href: '#home', label: 'Home' } });
@@ -42,14 +44,16 @@ export function render(root, ctx) {
     backup: ctx.prefs.get().lastBackupAt ? `Ultimo: ${formatDateIt(todayISO(new Date(ctx.prefs.get().lastBackupAt)))}` : 'Mai fatto',
     sync: st.signedIn ? `Attiva · ${st.email}` : 'Non attiva (facoltativa)',
     csv: CSV_FORMATS[ctx.prefs.get().csvFormat]?.label,
+    importa: 'Revolut o altri estratti conto',
+    periodo: ctx.prefs.get().budgetPeriod === 'salary' ? 'Dallo stipendio' : 'Mese di calendario',
   };
-  root.append(section({ title: 'Generale' }, list(...['tema', 'categorie', 'budget'].map((k) => row({ icon: SECTIONS[k].icon, color: SECTIONS[k].color, title: SECTIONS[k].title, subtitle: sub[k], href: `#impostazioni/${k}`, id: `set-${k}` })))));
-  root.append(section({ title: 'Dati' }, list(...['backup', 'csv', 'sync'].map((k) => row({ icon: SECTIONS[k].icon, color: SECTIONS[k].color, title: SECTIONS[k].title, subtitle: sub[k], href: `#impostazioni/${k}`, id: `set-${k}` })))));
-  root.append(section({ title: 'Strumenti' }, list(row({ icon: SECTIONS['fondo-pensione'].icon, color: SECTIONS['fondo-pensione'].color, title: SECTIONS['fondo-pensione'].title, subtitle: 'Stima di costo e risparmio di tasse', href: '#impostazioni/fondo-pensione', id: 'set-fondo-pensione' }))));
+  root.append(section({ title: 'Generale' }, list(...['tema', 'categorie', 'budget', 'periodo'].map((k) => row({ icon: SECTIONS[k].icon, color: SECTIONS[k].color, title: SECTIONS[k].title, subtitle: sub[k], href: `#impostazioni/${k}`, id: `set-${k}` })))));
+  root.append(section({ title: 'Dati' }, list(...['backup', 'csv', 'importa', 'sync'].map((k) => row({ icon: SECTIONS[k].icon, color: SECTIONS[k].color, title: SECTIONS[k].title, subtitle: sub[k], href: `#impostazioni/${k}`, id: `set-${k}` })))));
+  root.append(section({ title: 'Strumenti' }, list(row({ icon: PENSION.icon, color: PENSION.color, title: PENSION.title, subtitle: 'In Statistiche: stima di costo e risparmio di tasse', href: '#statistiche/fondo-pensione', id: 'set-fondo-pensione' }))));
   root.append(section({ title: 'App' }, list(row({ icon: 'phone', color: SECTIONS.installa.color, title: SECTIONS.installa.title, subtitle: ctx.install.installed() ? 'Già installata' : 'Android e iPhone', href: '#impostazioni/installa', id: 'set-installa' }),
     row({ icon: 'info', color: '#636366', title: 'Versione', value: version || '…', valueClass: 'is-muted', id: 'set-version' }))));
   root.append(el('p', { class: 'section-footer', text: 'MoneyFlow salva i dati su questo dispositivo. Nessuna notifica, nessun prezzo da internet.' }));
-  if (!version) ctx.getVersion().then((v) => { version = v || 'moneyflow-v3 (senza service worker)'; ctx.rerender(); });
+  if (!version) ctx.getVersion().then((v) => { version = v || 'moneyflow-v4 (senza service worker)'; ctx.rerender(); });
 }
 
 function tema(root, ctx) {
@@ -68,20 +72,20 @@ function categorie(root, ctx) {
   for (const [type, label] of [['uscita', 'Uscite'], ['entrata', 'Entrate']]) {
     const cats = C.sortedCategories(state, type);
     root.append(section({ title: label, action: el('button', { type: 'button', text: 'Nuova', id: `cat-new-${type}`, on: { click: () => openCategoryForm(ctx, null, type) } }) },
-      list(...cats.map((c) => row({ icon: 'tag', color: c.color, title: c.name, subtitle: c.role === 'stipendio' ? 'Stipendio (area tasse)' : c.budget ? `Budget ${formatEuro(c.budget)} al mese` : null, attrs: { 'data-cat': c.id }, onClick: () => openCategoryForm(ctx, c, type) })))));
+      list(...cats.map((c) => row({ icon: C.categoryIconOf(c), color: c.color, title: c.name, subtitle: c.role === 'stipendio' ? 'Stipendio (area tasse)' : c.role === 'interessi' ? 'Interessi dei depositi (automatici)' : c.budget ? `Budget ${formatEuro(c.budget)} per periodo` : null, attrs: { 'data-cat': c.id }, onClick: () => openCategoryForm(ctx, c, type) })))));
   }
   root.append(el('p', { class: 'section-footer', text: 'Se elimini una categoria, i movimenti restano con l\'etichetta "(eliminata)".' }));
 }
 
 function openCategoryForm(ctx, cat, type) {
   const state = ctx.store.getState();
-  const d = cat ? { name: cat.name, color: cat.color, budgetText: cat.budget ? formatEuroPlain(cat.budget) : '' } : { name: '', color: PALETTE[state.categories.length % PALETTE.length], budgetText: '' };
+  const d = cat ? { name: cat.name, color: cat.color, budgetText: cat.budget ? formatEuroPlain(cat.budget) : '', icon: cat.icon || null } : { name: '', color: PALETTE[state.categories.length % PALETTE.length], budgetText: '', icon: null };
   const api = sheet({
     title: cat ? 'Modifica categoria' : type === 'uscita' ? 'Nuova categoria di uscita' : 'Nuova categoria di entrata',
     onSave: () => {
       let b = null;
       if (type === 'uscita' && d.budgetText.trim()) { b = parseEuroInput(d.budgetText); if (!b) throw new ValidationError('Budget non valido', 'budget'); }
-      const inp = { name: d.name, color: d.color, budget: b, type, role: cat?.role || null };
+      const inp = { name: d.name, color: d.color, budget: b, type, role: cat?.role || null, icon: d.icon };
       if (cat) ctx.store.updateCategory(cat.id, inp); else ctx.store.addCategory({ ...inp, order: state.categories.length });
       toast(cat ? 'Categoria aggiornata' : 'Categoria creata');
       return true;
@@ -89,7 +93,9 @@ function openCategoryForm(ctx, cat, type) {
     content: (s) => {
       s.body.append(el('div', { class: 'form-group' },
         field({ label: 'Nome', field: 'name', id: 'c-name', input: input({ id: 'c-name', value: d.name, maxlength: 60, onInput: (v) => { d.name = v; } }) }),
-        type === 'uscita' ? field({ label: 'Budget mensile (€, facoltativo)', field: 'budget', id: 'c-budget', input: input({ id: 'c-budget', value: d.budgetText, inputmode: 'decimal', placeholder: 'Nessuno', onInput: (v) => { d.budgetText = v; } }) }) : null),
+        type === 'uscita' ? field({ label: 'Budget per periodo (€, facoltativo)', field: 'budget', id: 'c-budget', input: input({ id: 'c-budget', value: d.budgetText, inputmode: 'decimal', placeholder: 'Nessuno', onInput: (v) => { d.budgetText = v; } }) }) : null),
+      el('p', { class: 'field__label', text: 'Icona' }),
+      el('div', { class: 'form-group' }, el('div', { class: 'field' }, iconPicker(d.icon || C.categoryIconOf(cat), (v) => { d.icon = v; }))),
       el('p', { class: 'field__label', text: 'Colore' }),
       el('div', { class: 'form-group' }, el('div', { class: 'field', dataset: { field: 'color' } }, colorPicker(d.color, (c) => { d.color = c; }), el('p', { class: 'field__error', hidden: true }))));
       if (cat) {
@@ -102,12 +108,26 @@ function openCategoryForm(ctx, cat, type) {
   });
 }
 
+// ---- Periodo di budget (v4) ----
+function periodo(root, ctx) {
+  const cur = ctx.prefs.get().budgetPeriod === 'salary' ? 'salary' : 'calendar';
+  root.append(segmented([{ value: 'calendar', label: 'Mese di calendario', id: 'period-calendar' }, { value: 'salary', label: 'Dallo stipendio', id: 'period-salary' }], cur, (v) => {
+    ctx.prefs.set({ budgetPeriod: v });
+    toast(v === 'salary' ? 'Il periodo parte dall\'ultimo stipendio' : 'Il periodo è il mese di calendario');
+    ctx.rerender();
+  }, { label: 'Periodo di budget' }));
+  root.append(el('p', { class: 'section-footer', id: 'period-note', text: cur === 'salary'
+    ? 'Il periodo va dall\'ultima entrata Stipendio registrata al giorno prima della successiva. Finché non arriva, la fine è stimata alla stessa data del mese dopo; se lo stipendio è in ritardo, il periodo arriva a oggi.'
+    : 'Il periodo va dal 1° all\'ultimo giorno del mese.' }));
+  root.append(el('p', { class: 'section-footer', text: 'Vale per "Quanto ti resta", "Puoi spendere oggi" e i budget per categoria. Statistiche e CSV restano a mesi di calendario. Preferenza di questo dispositivo.' }));
+}
+
 // ---- Budget ----
 function budget(root, ctx) {
   const state = ctx.store.getState();
   const cats = C.sortedCategories(state, 'uscita');
-  root.append(section({ title: 'Budget mensile per categoria', footer: 'Quando lo superi, la barra in Home diventa rossa e compare un avviso al salvataggio della spesa. Le quote escluse non contano.' },
-    list(...cats.map((c) => row({ icon: 'gauge', color: c.color, title: c.name, value: c.budget ? formatEuro(c.budget) : 'Nessuno', valueClass: c.budget ? '' : 'is-muted', attrs: { 'data-budget-cat': c.id },
+  root.append(section({ title: 'Budget per categoria', footer: 'Vale per il periodo di budget (mese di calendario o dallo stipendio). Quando lo superi, la barra nella scheda Budget diventa rossa e compare un avviso al salvataggio della spesa. Le quote escluse non contano.' },
+    list(...cats.map((c) => row({ icon: C.categoryIconOf(c), color: c.color, title: c.name, value: c.budget ? formatEuro(c.budget) : 'Nessuno', valueClass: c.budget ? '' : 'is-muted', attrs: { 'data-budget-cat': c.id },
       onClick: () => {
         let text = c.budget ? formatEuroPlain(c.budget) : '';
         sheet({
@@ -120,7 +140,7 @@ function budget(root, ctx) {
             return true;
           },
           content: (s) => {
-            s.body.append(el('div', { class: 'form-group' }, field({ label: 'Importo al mese (€)', field: 'budget', id: 'b-amount', hint: 'Lascia vuoto per togliere il budget.',
+            s.body.append(el('div', { class: 'form-group' }, field({ label: 'Importo per periodo (€)', field: 'budget', id: 'b-amount', hint: 'Lascia vuoto per togliere il budget.',
               input: input({ id: 'b-amount', value: text, inputmode: 'decimal', placeholder: '0,00', cls: 'input--amount', onInput: (v) => { text = v; } }) })));
             setTimeout(() => document.getElementById('b-amount')?.focus(), 0);
           },

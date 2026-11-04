@@ -21,6 +21,55 @@ for (const name of ['busta-paga-sintetica.pdf', 'busta-paga-sintetica-cid.pdf'])
   });
 }
 
+// Modulo prestampato: etichette fisse in un Form XObject, "NETTO A PAGARE" una lettera per volta.
+test('PDF a modulo: netto letto', async () => {
+  const lines = await extractPdfLines(fixture('busta-paga-sintetica-modulo.pdf'));
+  assert.ok(lines.includes('I01 Impon. fiscale mese 2853,89'));
+  const r = parsePayslipLines(lines);
+  for (const [k, v] of Object.entries(EXPECTED)) assert.equal(r[k], v, k);
+  assert.deepEqual(r.missing, []);
+  assert.equal(r.netComputed, false);
+  assert.ok(lines.includes('N E T T O A P A G A R E'), 'etichetta letta dal Form XObject');
+  assert.ok(lines.includes('Descrizione voce (dati inventati)'));
+});
+
+// Esempio inventato: 3.250,00 − 811,01 = 2.438,99.
+const FERIE = 'Ferie 12,50 4,00 8,50 811,01 3250,00';
+
+test('netto: etichetta assente → Totale competenze − Totale ritenute, con avviso', () => {
+  const r = parsePayslipLines(['I01 Impon. fiscale mese 3312,45', FERIE, 'Banca: bonifico']);
+  assert.equal(r.gross, 325000);
+  assert.equal(r.net, 243899);
+  assert.equal(r.netComputed, true);
+  // senza etichetta ma con l'importo stampato da qualche parte: si prende quello, senza avviso
+  const r2 = parsePayslipLines([FERIE, 'IBAN IT00 X000', '2.438,90']);
+  assert.equal(r2.net, 243890);
+  assert.equal(r2.netComputed, false);
+  // senza etichetta e senza riga Ferie: niente netto
+  assert.equal(parsePayslipLines(['I01 Impon. fiscale mese 3312,45']).net, null);
+});
+
+test('netto: valore sopra l\'etichetta, a sinistra sulla stessa riga, lettere e cifre spaziate', () => {
+  assert.equal(parsePayslipLines([FERIE, '2.438,99', 'NETTO A PAGARE']).net, 243899);
+  assert.equal(parsePayslipLines([FERIE, '2.438,99 NETTO A PAGARE']).net, 243899);
+  const sp = parsePayslipLines([FERIE, 'N E T T O  A  P A G A R E', '2 . 4 3 8 , 9 9']);
+  assert.equal(sp.net, 243899);
+  assert.equal(sp.netComputed, false);
+  assert.equal(parsePayslipLines(['netto a pagare: 2.438,99']).net, 243899);
+  // i gettoni normali non si uniscono
+  assert.equal(parsePayslipLines(['23-10-2026 10 2026']).month, 10);
+  // "ferie" senza maiuscola
+  assert.equal(parsePayslipLines(['FERIE 1,00 2,00 811,01 3250,00']).gross, 325000);
+});
+
+test('netto: vince l\'importo uguale all\'atteso anche se più lontano dall\'etichetta', () => {
+  const r = parsePayslipLines([FERIE, 'NETTO A PAGARE', '1.000,00', 'Arrotondamento 0,42', '2.438,99']);
+  assert.equal(r.net, 243899);
+  // nessuno coincide: il primo con il punto delle migliaia
+  const r2 = parsePayslipLines(['Ferie 1,00 2,00 10,00 5000,00', 'NETTO A PAGARE', '0,42', '2.415,05']);
+  assert.equal(r2.net, 241505);
+});
+
 test('importi in formato italiano', () => {
   assert.equal(parseItAmount('3312,45'), 331245);
   assert.equal(parseItAmount('2.415,05'), 241505);

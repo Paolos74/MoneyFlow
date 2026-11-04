@@ -92,3 +92,13 @@ test('parsePercentInput e formatPercentBp: punti base interi', () => {
   assert.equal(formatPercentBp(173), '1,73%');
   assert.equal(formatPercentBp(80), '0,80%');
 });
+
+test('v4 parsePercentInput con max: ritenuta fino al 100 %, tasso fino al 20 %', () => {
+  assert.equal(parsePercentInput('26', { max: 10000 }), 2600);
+  assert.equal(parsePercentInput('100', { max: 10000 }), 10000);
+  assert.equal(parsePercentInput('100,01', { max: 10000 }), null);
+  assert.equal(parsePercentInput('0', { max: 10000 }), 0);
+  assert.equal(parsePercentInput('2,5', { max: 2000 }), 250);
+  assert.equal(parsePercentInput('21', { max: 2000 }), null);
+  assert.equal(parsePercentInput('100'), null, 'senza max resta al 10 %');
+});

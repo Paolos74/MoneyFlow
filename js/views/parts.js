@@ -24,11 +24,13 @@ function signedIn(state, accountId, v) {
   return formatEuroSigned(v);
 }
 
+const typeLabelOf = (m) => (m.type === 'variazione' && m.align ? 'Rettifica saldo' : TYPE_LABEL[m.type]);
+
 export function movementTitle(state, m) {
   if (m.description) return m.description;
   if (C.isTrade(m)) return C.tradeLabel(state, m);
   if (m.type === 'uscita' || m.type === 'entrata') return C.categoryLabel(state, m.categoryId);
-  return TYPE_LABEL[m.type];
+  return typeLabelOf(m);
 }
 
 // Riga di un movimento; con accountId mostra l'effetto su quel conto.
@@ -44,7 +46,7 @@ export function movementRow(ctx, m, { accountId = null } = {}) {
   } else if (m.type === 'trasferimento') sub.push(`${C.accountLabel(state, m.accountId)} → ${C.accountLabel(state, m.toAccountId)}`);
   else {
     if (m.type === 'uscita' || m.type === 'entrata') sub.push(C.categoryLabel(state, m.categoryId));
-    if (m.type === 'restituzione' || m.type === 'variazione') sub.push(TYPE_LABEL[m.type]);
+    if (m.type === 'restituzione' || m.type === 'variazione') sub.push(typeLabelOf(m));
     if (!accountId) sub.push(C.accountLabel(state, m.accountId));
   }
   let value;
@@ -79,7 +81,7 @@ export function movementRow(ctx, m, { accountId = null } = {}) {
   if (m.note) extras.push(el('span', { attrs: { 'aria-label': 'Con nota', title: m.note } }, icon('note')));
   return row({
     // Compra/Vendi: freccia in giù (entra crypto) o in su (esce crypto), sempre col colore del conto crypto.
-    icon: trade ? (m.trade === 'compra' ? 'down' : 'up') : TYPE_ICON[m.type],
+    icon: trade ? (m.trade === 'compra' ? 'down' : 'up') : m.type === 'uscita' || m.type === 'entrata' ? C.categoryIcon(state, m.categoryId) : m.align ? 'edit' : TYPE_ICON[m.type],
     color: trade ? (accountOf(state, cryptoId)?.color || C.movementColor(state, m)) : C.movementColor(state, m), title: movementTitle(state, m),
     subtitle: [el('span', { text: sub.join(' · ') }), ...extras], value, valueSub, valueClass, chevron: false,
     attrs: { 'data-movement': m.id },
