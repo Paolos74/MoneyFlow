@@ -1,8 +1,8 @@
-// Home: patrimonio, cash flow del mese (entrate, uscite, tasso di risparmio), Da confermare,
+// Home: patrimonio, mese corrente (entrate, uscite, tasso di risparmio), Da confermare,
 // Da ricevere, budget, obiettivi, promemoria backup. ⚙︎ porta alle Impostazioni.
 
 import { el, card, icon, emptyState, button, progress, list, row } from '../ui.js';
-import { formatEuro, formatEuroSigned, formatPercent } from '../money.js';
+import { formatEuro, formatPercent } from '../money.js';
 import { monthOf, monthLabel, monthStart, monthEnd } from '../dates.js';
 import * as C from '../calc.js';
 import { pendingRow, pendingGroups, pendingGroupRow } from './parts.js';
@@ -41,22 +41,18 @@ export function render(root, ctx) {
 
   // Patrimonio
   const nw = C.netWorth(state);
-  // Senza conti la card resta neutra e non fa concorrenza allo stato vuoto.
-  root.append(card({ title: 'Patrimonio', cls: accounts.length ? 'card--hero' : '', link: el('a', { class: 'card__link', href: '#conti', text: 'Conti' }) },
+  root.append(card({ title: 'Patrimonio', link: el('a', { class: 'card__link', href: '#conti', text: 'Conti' }) },
     el('p', { class: 'hero__value', id: 'networth', text: formatEuro(nw.eurCents) }),
     nw.crypto.length ? el('p', { class: 'hero__sub', id: 'networth-crypto', text: `${C.cryptoLine(nw)} · senza valore in euro (nessun prezzo)` }) : null));
 
   // Mese corrente
   const t = C.totals(state, monthStart(ym), monthEnd(ym));
-  // Numero grande: cash flow = entrate contate − uscite contate del mese, verde se ≥ 0, rosso se < 0.
   root.append(card({ title: monthLabel(ym), link: el('a', { class: 'card__link', href: '#statistiche', text: 'Statistiche' }) },
-    el('p', { class: 'hero__label', text: 'Cash flow del mese' }),
-    el('p', { class: 'hero__value ' + (t.net >= 0 ? 'is-income' : 'is-danger'), id: 'month-cashflow', text: formatEuroSigned(t.net) }),
     el('div', { class: 'stats' },
       stat('Entrate', formatEuro(t.income), 'month-income', 'is-income'),
       stat('Uscite', formatEuro(t.expense), 'month-expense'),
       stat('Risparmio', formatPercent(t.rate), 'month-rate', t.rate < 0 ? 'is-danger' : '')),
-    t.income ? null : el('p', { class: 'hero__sub', text: 'Il tasso di risparmio compare quando registri un\'entrata.' })));
+    el('p', { class: 'hero__sub', text: t.income ? `Hai messo da parte ${formatEuro(t.net)} delle entrate del mese.` : 'Il tasso di risparmio compare quando registri un\'entrata.' })));
 
   // Da confermare
   const pending = C.pendingList(state, today);
@@ -70,7 +66,7 @@ export function render(root, ctx) {
   const credits = C.openCredits(state);
   if (credits.total > 0) {
     root.append(el('div', { class: 'section' }, list(row({
-      icon: 'hand', color: 'var(--accent-fill)', title: 'Da ricevere', subtitle: `${credits.items.length} ${credits.items.length === 1 ? 'quota anticipata' : 'quote anticipate'}`,
+      icon: 'hand', color: '#0891B2', title: 'Da ricevere', subtitle: `${credits.items.length} ${credits.items.length === 1 ? 'quota anticipata' : 'quote anticipate'}`,
       value: formatEuro(credits.total), href: '#da-ricevere', id: 'home-credits',
     }))));
   }
@@ -87,9 +83,7 @@ export function render(root, ctx) {
   }
 
   // Obiettivi
-  // Solo gli obiettivi attivi; i completati sono nella sezione "Completati" della scheda Conti.
-  const goals = C.activeGoals(state);
-  const anyGoal = state.goals.some((g) => !g.deleted);
+  const goals = state.goals.filter((g) => !g.deleted);
   if (goals.length) {
     root.append(card({ title: 'Obiettivi', link: el('a', { class: 'card__link', href: '#conti/obiettivi', text: 'Tutti' }) },
       goals.slice(0, 3).map((g) => {
@@ -97,14 +91,14 @@ export function render(root, ctx) {
         return el('a', { class: 'meter', href: `#obiettivi/${g.id}` },
           el('div', { class: 'meter__top' }, el('span', { text: g.name }), el('span', { text: `${formatEuro(g.saved)} / ${formatEuro(g.target)}` })),
           progress(g.saved / g.target, { color: g.color }),
-          el('div', { class: 'meter__note', text: p.quota ? `${formatEuro(p.monthSaved)} di ${formatEuro(p.quota)} questo mese` : p.expired ? 'Scaduto' : p.monthly ? `${formatEuro(p.monthly)} al mese` : `Mancano ${formatEuro(p.remaining)}` }));
+          el('div', { class: 'meter__note', text: p.done ? 'Raggiunto' : p.expired ? 'Scaduto' : p.monthly ? `${formatEuro(p.monthly)} al mese` : `Mancano ${formatEuro(p.remaining)}` }));
       })));
   }
 
   root.append(el('div', { class: 'section' }, list(
     row({ icon: 'repeat', color: '#7C3AED', title: 'Pagamenti programmati', subtitle: 'Abbonamenti, affitto, bollette', href: '#programmati', id: 'home-scheduled' }),
     budgets.length ? null : row({ icon: 'gauge', color: '#D97706', title: 'Imposta un budget', subtitle: 'Limite mensile per categoria', href: '#impostazioni/budget' }),
-    anyGoal ? null : row({ icon: 'target', color: '#DB2777', title: 'Crea un obiettivo di risparmio', href: '#conti/obiettivi' }))));
+    goals.length ? null : row({ icon: 'target', color: '#DB2777', title: 'Crea un obiettivo di risparmio', href: '#conti/obiettivi' }))));
 }
 
 function stat(label, value, id, cls = '') {

@@ -26,7 +26,6 @@ function signedIn(state, accountId, v) {
 
 export function movementTitle(state, m) {
   if (m.description) return m.description;
-  if (C.isTrade(m)) return C.tradeLabel(state, m);
   if (m.type === 'uscita' || m.type === 'entrata') return C.categoryLabel(state, m.categoryId);
   return TYPE_LABEL[m.type];
 }
@@ -35,13 +34,7 @@ export function movementTitle(state, m) {
 export function movementRow(ctx, m, { accountId = null } = {}) {
   const state = ctx.store.getState();
   const sub = [];
-  if (C.isTrade(m)) {
-    // "0,01 BTC × 60.000,00 €"
-    const qty = m.trade === 'compra' ? m.amountTo : m.amount;
-    const cryptoId = m.trade === 'compra' ? m.toAccountId : m.accountId;
-    sub.push(`${amountIn(state, cryptoId, qty)} × ${formatEuro(m.price)}`);
-    if (!accountId) sub.push(C.accountLabel(state, m.trade === 'compra' ? m.accountId : m.toAccountId));
-  } else if (m.type === 'trasferimento') sub.push(`${C.accountLabel(state, m.accountId)} → ${C.accountLabel(state, m.toAccountId)}`);
+  if (m.type === 'trasferimento') sub.push(`${C.accountLabel(state, m.accountId)} → ${C.accountLabel(state, m.toAccountId)}`);
   else {
     if (m.type === 'uscita' || m.type === 'entrata') sub.push(C.categoryLabel(state, m.categoryId));
     if (m.type === 'restituzione' || m.type === 'variazione') sub.push(TYPE_LABEL[m.type]);
@@ -70,17 +63,11 @@ export function movementRow(ctx, m, { accountId = null } = {}) {
   if (m.type === 'uscita' && m.excluded) valueSub = `conta ${formatEuro(m.amount - m.excluded)}`;
   if (m.type === 'entrata' && m.gross) valueSub = `lordo ${formatEuro(m.gross)}`;
   if (m.type === 'trasferimento' && m.amountTo) valueSub = `→ ${amountIn(state, m.toAccountId, m.amountTo)}`;
-  // Compra/Vendi visti dal conto crypto: sotto la quantità l'importo in euro pagato o ricevuto.
-  const trade = C.isTrade(m);
-  const cryptoId = trade ? (m.trade === 'compra' ? m.toAccountId : m.accountId) : null;
-  if (trade && accountId === cryptoId) valueSub = m.trade === 'compra' ? `pagati ${formatEuro(m.amount)}` : `ricevuti ${formatEuro(m.amountTo)}`;
   const extras = [];
   if (m.type === 'uscita' && m.excluded) extras.push(el('span', { class: 'tag tag--accent', text: `esclusi ${formatEuro(m.excluded)}` }));
   if (m.note) extras.push(el('span', { attrs: { 'aria-label': 'Con nota', title: m.note } }, icon('note')));
   return row({
-    // Compra/Vendi: freccia in giù (entra crypto) o in su (esce crypto), sempre col colore del conto crypto.
-    icon: trade ? (m.trade === 'compra' ? 'down' : 'up') : TYPE_ICON[m.type],
-    color: trade ? (accountOf(state, cryptoId)?.color || C.movementColor(state, m)) : C.movementColor(state, m), title: movementTitle(state, m),
+    icon: TYPE_ICON[m.type], color: C.movementColor(state, m), title: movementTitle(state, m),
     subtitle: [el('span', { text: sub.join(' · ') }), ...extras], value, valueSub, valueClass, chevron: false,
     attrs: { 'data-movement': m.id },
     onClick: () => openMovementForm(ctx, { movement: ctx.store.find('movement', m.id) }),

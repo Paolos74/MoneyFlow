@@ -21,7 +21,6 @@ const state = {
     { id: 'm5', type: 'restituzione', date: '2025-03-04', amount: 2000, accountId: 'a1', refundOf: 'm1', description: '@mario', createdAt: 5, deleted: false },
     { id: 'm6', type: 'variazione', date: '2025-03-05', amount: -1000, accountId: 'a2', description: '+fee', createdAt: 6, deleted: false },
     { id: 'm7', type: 'uscita', date: '2025-03-06', amount: 1, accountId: 'a1', categoryId: 'zz', description: '', createdAt: 7, deleted: true },
-    { id: 'm9', type: 'uscita', date: '2025-03-07', amount: 1000, excluded: 1000, accountId: 'a1', categoryId: 'c1', description: 'Per un amico', createdAt: 9, deleted: false },
     { id: 'm8', type: 'uscita', date: '2025-04-01', amount: 1, accountId: 'a1', categoryId: 'c1', description: 'fuori', createdAt: 8, deleted: false },
   ],
 };
@@ -29,13 +28,12 @@ const state = {
 test('formato ; (Excel italiano)', () => {
   const expected = '\uFEFF' + [
     'Data;Conto;Tipo;Categoria;Descrizione;Importo',
-    '01/03/2025;Revolut;Uscita;Ristoranti;"Cena; ""amici"", ok";-20,00',
+    '01/03/2025;Revolut;Uscita;Ristoranti;"Cena; ""amici"", ok";-40,00',
     '01/03/2025;Revolut;Entrata;Stipendio;Marzo;1500,00',
     "02/03/2025;Vecchio (eliminato);Uscita;Ristoranti;'=SOMMA(A1);-12,50",
     `03/03/2025;Revolut → Coinbase (BTC);Trasferimento;;"'-x\nriga";100,00`,
     "04/03/2025;Revolut;Restituzione;;'@mario;20,00",
     "05/03/2025;Coinbase (BTC);Variazione quantità;;'+fee;-0,00001",
-    '07/03/2025;Revolut;Uscita;Ristoranti;Per un amico;0,00',
   ].join('\r\n') + '\r\n';
   assert.equal(buildCsv(state, { from: '2025-03-01', to: '2025-03-31', format: 'semicolon' }), expected);
 });
@@ -43,13 +41,12 @@ test('formato ; (Excel italiano)', () => {
 test('formato , (Numbers, Google Fogli) con importi tra virgolette', () => {
   const expected = '\uFEFF' + [
     'Data,Conto,Tipo,Categoria,Descrizione,Importo',
-    '01/03/2025,Revolut,Uscita,Ristoranti,"Cena; ""amici"", ok","-20,00"',
+    '01/03/2025,Revolut,Uscita,Ristoranti,"Cena; ""amici"", ok","-40,00"',
     '01/03/2025,Revolut,Entrata,Stipendio,Marzo,"1500,00"',
     "02/03/2025,Vecchio (eliminato),Uscita,Ristoranti,'=SOMMA(A1),\"-12,50\"",
     `03/03/2025,Revolut → Coinbase (BTC),Trasferimento,,"'-x\nriga","100,00"`,
     "04/03/2025,Revolut,Restituzione,,'@mario,\"20,00\"",
     "05/03/2025,Coinbase (BTC),Variazione quantità,,'+fee,\"-0,00001\"",
-    '07/03/2025,Revolut,Uscita,Ristoranti,Per un amico,"0,00"',
   ].join('\r\n') + '\r\n';
   assert.equal(buildCsv(state, { from: '2025-03-01', to: '2025-03-31', format: 'comma' }), expected);
 });
