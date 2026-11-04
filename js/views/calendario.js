@@ -51,7 +51,7 @@ export function render(root, ctx) {
     grid));
   root.append(el('div', { class: 'legend-inline' },
     el('span', {}, el('span', { class: 'dot', vars: { '--c': 'var(--accent)' } }), 'Registrato'),
-    el('span', {}, el('span', { class: 'dot dot--planned', vars: { '--c': 'var(--accent)' } }), 'Programmato'),
+    el('span', {}, el('span', { class: 'dot dot--planned', vars: { '--c': 'var(--violet)' } }), 'Programmato'),
     monthOf(today) !== ym ? button('Oggi', () => pick(today), { kind: 'plain', small: true, id: 'cal-today' }) : null));
 
   const det = C.dayDetails(state, selected, today);

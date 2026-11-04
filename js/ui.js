@@ -74,9 +74,12 @@ export function list(...rows) {
   return el('div', { class: 'list' }, ...rows);
 }
 
-export function card({ title, link, cls = '' }, ...content) {
-  return el('section', { class: 'card ' + cls },
-    title || link ? el('div', { class: 'card__head' }, el('h2', { class: 'card__title', text: title || '' }), link || null) : null,
+// tint: colore dell'ambito (teal, indigo, violet, amber, pink, emerald); icon: glifo nel riquadro accanto al titolo;
+// color: colore del riquadro (es. quello del conto) al posto della tinta.
+export function card({ title, link, cls = '', tint, icon: ic, color }, ...content) {
+  const badge = ic ? el('span', { class: 'card__badge', vars: color ? { '--c': color } : {} }, icon(ic)) : null;
+  return el('section', { class: `card ${tint ? 'card--t-' + tint : ''} ${cls}` },
+    title || link ? el('div', { class: 'card__head' }, el('h2', { class: 'card__title' }, badge, el('span', { text: title || '' })), link || null) : null,
     ...content);
 }
 

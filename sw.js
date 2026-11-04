@@ -1,18 +1,18 @@
 // Service worker di MoneyFlow: cache dei file dell'app, offline, aggiornamento solo su richiesta.
 // AUMENTARE VERSION A OGNI RILASCIO e tenere ASSETS uguale ai file pubblicati.
 
-const VERSION = 'moneyflow-v2';
+const VERSION = 'moneyflow-v3';
 const ASSETS = [
   './',
   'index.html',
   'offline.html',
   'manifest.webmanifest',
   'css/app.css',
-  'icons/icon-192.png',
-  'icons/icon-512.png',
-  'icons/icon-maskable-512.png',
-  'icons/apple-touch-icon.png',
-  'icons/favicon-32.png',
+  'icons/moneyflow-v3-192.png',
+  'icons/moneyflow-v3-512.png',
+  'icons/moneyflow-v3-maskable-512.png',
+  'icons/moneyflow-v3-apple-touch-180.png',
+  'icons/moneyflow-v3-favicon-32.png',
   'js/app.js',
   'js/backup.js',
   'js/calc.js',

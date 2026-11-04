@@ -2,7 +2,7 @@
 
 App personale per gestire soldi, risparmi, stipendio e spese nel tempo. Funziona nel browser e si installa sul telefono (Android e iPhone). I dati restano sul dispositivo; la sincronizzazione online con Firebase è facoltativa.
 
-Versione: **moneyflow-v2**
+Versione: **moneyflow-v3**
 
 ## Come si usa
 
@@ -55,11 +55,15 @@ Importante: su iPhone un sito non installato può perdere i dati dopo circa 7 gi
 5. Vai in **Settings** → **Pages**. In **Build and deployment** scegli **Deploy from a branch**, poi branch **main** e cartella **/(root)** → **Save**.
 6. Dopo 1–2 minuti l'app è su `https://<tuo-utente>.github.io/moneyflow/`.
 
+**Icona dell'app:** è nella cartella `icons/` (file `moneyflow-v3-…png`), che va caricata insieme alle altre. Per controllare apri `https://<tuo-utente>.github.io/moneyflow/icons/moneyflow-v3-192.png`: se non vedi la moneta d'oro con la freccia, la cartella manca.
+
 Se vedi una pagina senza stile con un'icona gigante, le cartelle `css/` e `js/` non sono state caricate (oppure hai aperto `index.html` con doppio clic dal computer). Controlla aprendo `https://<tuo-utente>.github.io/moneyflow/css/app.css`, poi ricarica con Ctrl+F5.
 
 ## Aggiornamenti
 
 Per ogni aggiornamento riceverai uno zip con **solo i file cambiati** e l'elenco dei file da cancellare. Su GitHub: **Add file** → **Upload files** → trascina il contenuto dello zip (cartelle comprese) → **Commit changes**. Poi riapri l'app e tocca **Aggiorna** sul banner "Nuova versione disponibile". L'app non si ricarica mai da sola, così non perdi un inserimento a metà.
+
+**Icona nuova (dalla v3):** su Android Chrome aggiorna da solo l'icona dell'app installata, di solito entro qualche giorno; se vuoi vederla subito tieni premuta l'icona → **Disinstalla** (*Uninstall*), poi riapri l'indirizzo in Chrome → menu **⋮** → **Installa app**. Su iPhone l'icona si legge solo quando aggiungi l'app alla Home: tieni premuta l'icona → **Rimuovi app** (*Remove App*) → **Rimuovi dalla schermata Home**, poi Safari → **Condividi** → **Aggiungi alla schermata Home**. Prima fai un backup (Impostazioni → Backup), perché su iPhone togliere l'app può cancellare i suoi dati.
 
 ## Sincronizzazione con Firebase (facoltativa, gratuita)
 

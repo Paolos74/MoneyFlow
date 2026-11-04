@@ -58,7 +58,7 @@ function renderGoals(root, ctx, state) {
         : p.monthly ? `Metti da parte ${formatEuro(p.monthly)} al mese per ${p.monthsLeft} ${p.monthsLeft === 1 ? 'mese' : 'mesi'}` : `Mancano ${formatEuro(p.remaining)}`;
     return el('a', { class: 'card', href: `#obiettivi/${g.id}`, attrs: { 'data-goal': g.id } },
       el('div', { class: 'card__head' }, el('h2', { class: 'goal__title', text: g.name }),
-        el('span', { class: 'tag' + (p.done ? ' tag--done' : ''), text: p.done ? 'Completato ✓' : p.expired ? 'Scaduto' : g.deadline ? `entro ${formatDateIt(g.deadline)}` : 'senza scadenza' })),
+        el('span', { class: 'tag' + (p.done ? ' tag--done' : ' tag--goal'), text: p.done ? 'Completato ✓' : p.expired ? 'Scaduto' : g.deadline ? `entro ${formatDateIt(g.deadline)}` : 'senza scadenza' })),
       el('div', { class: 'meter__top' }, el('span', { class: 'num', text: formatEuro(g.saved) }), el('span', { text: `di ${formatEuro(g.target)}` })),
       progress(g.saved / g.target, { color: g.color }),
       el('div', { class: 'meter__note', text: note }));

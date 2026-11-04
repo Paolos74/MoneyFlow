@@ -104,7 +104,7 @@ export function line(points, { width = 340, height = 170, label = 'Andamento', f
     body += `<path class="chart__area" d="M${r2(x(0))} ${r2(y(min))}L${pts.join('L')}L${r2(x(points.length - 1))} ${r2(y(min))}Z"/>`;
     body += `<path class="chart__line" d="M${pts.join('L')}" fill="none" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round"/>`;
     const li = points.length - 1;
-    body += `<circle class="chart__income" cx="${r2(x(li))}" cy="${r2(y(points[li].value))}" r="4"><title>${esc(`${points[li].label}: ${format(points[li].value)}`)}</title></circle>`;
+    body += `<circle class="chart__dot" cx="${r2(x(li))}" cy="${r2(y(points[li].value))}" r="4"><title>${esc(`${points[li].label}: ${format(points[li].value)}`)}</title></circle>`;
     body += `<text x="${r2(x(0))}" y="${height - 6}" font-size="11">${esc(points[0].label)}</text>`;
     if (li > 0) body += `<text x="${r2(x(li))}" y="${height - 6}" text-anchor="end" font-size="11">${esc(points[li].label)}</text>`;
     body += `<text x="${width - 2}" y="12" text-anchor="end" font-size="11">${esc(format(points[li].value))}</text>`;

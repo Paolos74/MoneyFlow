@@ -13,15 +13,15 @@ import { periodPicker } from './parts.js';
 import { render as fondoPensione } from './fondo-pensione.js';
 
 const SECTIONS = {
-  tema: { title: 'Tema', icon: 'sun', color: '#D97706' },
-  categorie: { title: 'Categorie', icon: 'tag', color: '#DB2777' },
-  budget: { title: 'Budget', icon: 'gauge', color: '#EA580C' },
+  tema: { title: 'Tema', icon: 'sun', color: 'var(--amber-fill)' },
+  categorie: { title: 'Categorie', icon: 'tag', color: 'var(--pink-fill)' },
+  budget: { title: 'Budget', icon: 'gauge', color: 'var(--amber-fill)' },
   backup: { title: 'Backup', icon: 'download', color: '#2563EB' },
-  csv: { title: 'Esporta CSV', icon: 'doc', color: '#0891B2' },
-  sync: { title: 'Sincronizzazione', icon: 'cloud', color: '#4F46E5' },
-  installa: { title: 'Installa l\'app', icon: 'phone', color: '#047857' },
+  csv: { title: 'Esporta CSV', icon: 'doc', color: 'var(--teal-fill)' },
+  sync: { title: 'Sincronizzazione', icon: 'cloud', color: 'var(--indigo-fill)' },
+  installa: { title: 'Installa l\'app', icon: 'phone', color: 'var(--accent-fill)' },
   // Scelta provvisoria: il simulatore sta in Impostazioni → Strumenti (la schermata "Altro" non esiste).
-  'fondo-pensione': { title: 'Se aumento il fondo pensione', icon: 'coin', color: '#047857' },
+  'fondo-pensione': { title: 'Se aumento il fondo pensione', icon: 'coin', color: 'var(--indigo-fill)' },
 };
 
 let csvPeriod = null;
@@ -47,9 +47,9 @@ export function render(root, ctx) {
   root.append(section({ title: 'Dati' }, list(...['backup', 'csv', 'sync'].map((k) => row({ icon: SECTIONS[k].icon, color: SECTIONS[k].color, title: SECTIONS[k].title, subtitle: sub[k], href: `#impostazioni/${k}`, id: `set-${k}` })))));
   root.append(section({ title: 'Strumenti' }, list(row({ icon: SECTIONS['fondo-pensione'].icon, color: SECTIONS['fondo-pensione'].color, title: SECTIONS['fondo-pensione'].title, subtitle: 'Stima di costo e risparmio di tasse', href: '#impostazioni/fondo-pensione', id: 'set-fondo-pensione' }))));
   root.append(section({ title: 'App' }, list(row({ icon: 'phone', color: SECTIONS.installa.color, title: SECTIONS.installa.title, subtitle: ctx.install.installed() ? 'Già installata' : 'Android e iPhone', href: '#impostazioni/installa', id: 'set-installa' }),
-    row({ icon: 'info', color: '#64748B', title: 'Versione', value: version || '…', valueClass: 'is-muted', id: 'set-version' }))));
+    row({ icon: 'info', color: '#636366', title: 'Versione', value: version || '…', valueClass: 'is-muted', id: 'set-version' }))));
   root.append(el('p', { class: 'section-footer', text: 'MoneyFlow salva i dati su questo dispositivo. Nessuna notifica, nessun prezzo da internet.' }));
-  if (!version) ctx.getVersion().then((v) => { version = v || 'moneyflow-v2 (senza service worker)'; ctx.rerender(); });
+  if (!version) ctx.getVersion().then((v) => { version = v || 'moneyflow-v3 (senza service worker)'; ctx.rerender(); });
 }
 
 function tema(root, ctx) {

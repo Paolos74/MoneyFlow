@@ -61,7 +61,7 @@ test('manifest valido con i campi di §7', () => {
 });
 
 test('dimensioni delle icone (header IHDR)', () => {
-  const want = { 'icons/icon-192.png': 192, 'icons/icon-512.png': 512, 'icons/icon-maskable-512.png': 512, 'icons/apple-touch-icon.png': 180, 'icons/favicon-32.png': 32 };
+  const want = { 'icons/moneyflow-v3-192.png': 192, 'icons/moneyflow-v3-512.png': 512, 'icons/moneyflow-v3-maskable-512.png': 512, 'icons/moneyflow-v3-apple-touch-180.png': 180, 'icons/moneyflow-v3-favicon-32.png': 32 };
   for (const [f, size] of Object.entries(want)) {
     const b = readFileSync(join(ROOT, f));
     assert.equal(b.toString('latin1', 1, 4), 'PNG', f);
@@ -69,8 +69,8 @@ test('dimensioni delle icone (header IHDR)', () => {
     assert.equal(b.readUInt32BE(20), size, f);
   }
   const html = read('index.html');
-  assert.match(html, /rel="apple-touch-icon" href="icons\/apple-touch-icon.png"/);
-  assert.match(html, /rel="icon"[^>]*href="icons\/favicon-32.png"/);
+  assert.match(html, /rel="apple-touch-icon"[^>]*href="icons\/moneyflow-v3-apple-touch-180.png"/);
+  assert.match(html, /rel="icon"[^>]*href="icons\/moneyflow-v3-favicon-32.png"/);
 });
 
 test('nessun riferimento vietato nei file pubblicati e nella documentazione', () => {

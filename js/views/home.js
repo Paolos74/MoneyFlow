@@ -49,19 +49,19 @@ export function render(root, ctx) {
   // Mese corrente
   const t = C.totals(state, monthStart(ym), monthEnd(ym));
   // Numero grande: cash flow = entrate contate − uscite contate del mese, verde se ≥ 0, rosso se < 0.
-  root.append(card({ title: monthLabel(ym), link: el('a', { class: 'card__link', href: '#statistiche', text: 'Statistiche' }) },
+  root.append(card({ title: monthLabel(ym), tint: 'teal', icon: 'chart', link: el('a', { class: 'card__link', href: '#statistiche', text: 'Statistiche' }) },
     el('p', { class: 'hero__label', text: 'Cash flow del mese' }),
     el('p', { class: 'hero__value ' + (t.net >= 0 ? 'is-income' : 'is-danger'), id: 'month-cashflow', text: formatEuroSigned(t.net) }),
     el('div', { class: 'stats' },
-      stat('Entrate', formatEuro(t.income), 'month-income', 'is-income'),
-      stat('Uscite', formatEuro(t.expense), 'month-expense'),
-      stat('Risparmio', formatPercent(t.rate), 'month-rate', t.rate < 0 ? 'is-danger' : '')),
+      stat('Entrate', formatEuro(t.income), 'month-income', 'is-income', 'stat--income'),
+      stat('Uscite', formatEuro(t.expense), 'month-expense', '', 'stat--expense'),
+      stat('Risparmio', formatPercent(t.rate), 'month-rate', t.rate < 0 ? 'is-danger' : '', 'stat--rate')),
     t.income ? null : el('p', { class: 'hero__sub', text: 'Il tasso di risparmio compare quando registri un\'entrata.' })));
 
   // Da confermare
   const pending = C.pendingList(state, today);
   if (pending.length) {
-    root.append(card({ title: `Da confermare (${pending.length})`, link: el('a', { class: 'card__link', href: '#da-confermare', text: 'Tutti' }) },
+    root.append(card({ title: `Da confermare (${pending.length})`, tint: 'violet', icon: 'clock', link: el('a', { class: 'card__link', href: '#da-confermare', text: 'Tutti' }) },
       // Una riga per programmato: con più scadenze arretrate "N scadenze" e Vedi.
       el('div', { class: 'list list--flat' }, pendingGroups(pending).slice(0, 3).map((g, i) => (g.items.length === 1 ? pendingRow(ctx, g.items[0], i) : pendingGroupRow(ctx, g, i))))));
   }
@@ -78,7 +78,7 @@ export function render(root, ctx) {
   // Budget
   const budgets = C.budgetStatus(state, ym);
   if (budgets.length) {
-    root.append(card({ title: 'Budget del mese', link: el('a', { class: 'card__link', href: '#impostazioni/budget', text: 'Modifica' }) },
+    root.append(card({ title: 'Budget del mese', tint: 'amber', icon: 'gauge', link: el('a', { class: 'card__link', href: '#impostazioni/budget', text: 'Modifica' }) },
       // Tocco su un budget: Movimenti del mese filtrati per quella categoria.
       budgets.map((b) => el('a', { class: 'meter' + (b.over ? ' is-over' : ''), href: `#movimenti?periodo=mese&categoria=${encodeURIComponent(b.category.id)}`, attrs: { 'data-budget': b.category.id, 'aria-label': `${b.category.name}: vedi i movimenti del mese` } },
         el('div', { class: 'meter__top' }, el('span', { text: b.category.name }), el('span', { text: `${formatEuro(b.spent)} / ${formatEuro(b.budget)}` })),
@@ -91,7 +91,7 @@ export function render(root, ctx) {
   const goals = C.activeGoals(state);
   const anyGoal = state.goals.some((g) => !g.deleted);
   if (goals.length) {
-    root.append(card({ title: 'Obiettivi', link: el('a', { class: 'card__link', href: '#conti/obiettivi', text: 'Tutti' }) },
+    root.append(card({ title: 'Obiettivi', tint: 'pink', icon: 'target', link: el('a', { class: 'card__link', href: '#conti/obiettivi', text: 'Tutti' }) },
       goals.slice(0, 3).map((g) => {
         const p = C.goalProgress(g, today);
         return el('a', { class: 'meter', href: `#obiettivi/${g.id}` },
@@ -102,11 +102,11 @@ export function render(root, ctx) {
   }
 
   root.append(el('div', { class: 'section' }, list(
-    row({ icon: 'repeat', color: '#7C3AED', title: 'Pagamenti programmati', subtitle: 'Abbonamenti, affitto, bollette', href: '#programmati', id: 'home-scheduled' }),
-    budgets.length ? null : row({ icon: 'gauge', color: '#D97706', title: 'Imposta un budget', subtitle: 'Limite mensile per categoria', href: '#impostazioni/budget' }),
-    anyGoal ? null : row({ icon: 'target', color: '#DB2777', title: 'Crea un obiettivo di risparmio', href: '#conti/obiettivi' }))));
+    row({ icon: 'repeat', color: 'var(--violet-fill)', title: 'Pagamenti programmati', subtitle: 'Abbonamenti, affitto, bollette', href: '#programmati', id: 'home-scheduled' }),
+    budgets.length ? null : row({ icon: 'gauge', color: 'var(--amber-fill)', title: 'Imposta un budget', subtitle: 'Limite mensile per categoria', href: '#impostazioni/budget' }),
+    anyGoal ? null : row({ icon: 'target', color: 'var(--pink-fill)', title: 'Crea un obiettivo di risparmio', href: '#conti/obiettivi' }))));
 }
 
-function stat(label, value, id, cls = '') {
-  return el('div', { class: 'stat' }, el('div', { class: 'stat__label', text: label }), el('div', { class: `stat__value ${cls}`, id, text: value }));
+function stat(label, value, id, cls = '', tileCls = '') {
+  return el('div', { class: `stat ${tileCls}` }, el('div', { class: 'stat__label', text: label }), el('div', { class: `stat__value ${cls}`, id, text: value }));
 }

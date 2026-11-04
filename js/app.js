@@ -42,7 +42,7 @@ const topbar = $('topbar');
 const isDark = (theme) => theme === 'dark' || (theme === 'auto' && matchMedia('(prefers-color-scheme: dark)').matches);
 function applyTheme(theme = prefs.get().theme) {
   document.documentElement.setAttribute('data-theme', theme);
-  document.querySelector('meta[name="theme-color"]')?.setAttribute('content', isDark(theme) ? '#0B0F0D' : '#F2F5F3');
+  document.querySelector('meta[name="theme-color"]')?.setAttribute('content', isDark(theme) ? '#000000' : '#F2F2F7');
 }
 matchMedia('(prefers-color-scheme: dark)').addEventListener?.('change', () => applyTheme());
 

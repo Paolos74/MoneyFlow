@@ -18,70 +18,95 @@
 :root[data-theme="light"] { color-scheme: light; }
 :root[data-theme="dark"] { color-scheme: dark; }
 :root, :root[data-theme="light"] {
-  --bg: #F2F5F3;
+  --bg: #F2F2F7;
   --surface: #FFFFFF;
-  --surface-2: #E8EEEA;
-  --text: #0B1A14;
-  --muted: #56645E;
-  --separator: rgba(40, 52, 46, 0.16);
+  --surface-2: #EEEEF3;
+  --text: #111114;
+  --muted: #5F5F67;
+  --separator: rgba(60, 60, 67, 0.18);
   --accent: #047857;
   --accent-fill: #047857;
   --on-accent: #FFFFFF;
-  --accent-soft: rgba(4, 120, 87, 0.12);
+  --accent-soft: #E1EFEB;
   --danger: #C5221F;
-  --danger-soft: rgba(197, 34, 31, 0.12);
+  --danger-soft: #F8E4E4;
+  --danger-on-teal: #C5221F;
   --warning: #A15C07;
   --income: #047857;
-  --bar-bg: rgba(242, 245, 243, 0.82);
+  /* Colori complementari (v3): testo, pieno con testo bianco, tenue opaco. */
+  --teal: #0E7490; --teal-fill: #0E7490; --teal-soft: #E2EEF2;
+  --indigo: #4F46E5; --indigo-fill: #4F46E5; --indigo-soft: #EAE9FC;
+  --violet: #7C3AED; --violet-fill: #7C3AED; --violet-soft: #EFE7FD;
+  --amber: #A3480A; --amber-fill: #B45309; --amber-soft: #F4E9E2;
+  --pink: #BE185D; --pink-fill: #BE185D; --pink-soft: #F7E3EC;
+  --chart-expense: #E5484D;
+  --segment-on: #FFFFFF;
+  --bar-bg: rgba(249, 249, 251, 0.82);
   --shadow: 0 1px 2px rgba(0, 0, 0, 0.05), 0 4px 16px rgba(0, 0, 0, 0.05);
   --backdrop: rgba(0, 0, 0, 0.32);
-  /* Card in evidenza (Patrimonio): smeraldo pieno, testo bianco ≥ 5,48:1 (anche col riflesso 4,70:1). */
-  --hero-bg: linear-gradient(150deg, #047857 0%, #065F46 60%, #064E3B 100%);
-  --hero-shadow: 0 10px 28px rgba(4, 120, 87, 0.30);
+  /* Card in evidenza (Patrimonio): smeraldo → laguna, testo bianco ≥ 5,47:1 (col riflesso ≥ 4,6:1). */
+  --hero-bg: linear-gradient(150deg, #047857 0%, #0D6E68 55%, #155E75 100%);
+  --hero-shadow: 0 10px 28px rgba(14, 116, 144, 0.26);
 }
 
 :root[data-theme="dark"] {
-  --bg: #0B0F0D;
-  --surface: #161C19;
-  --surface-2: #232B27;
-  --text: #EEF4F1;
-  --muted: #9EACA6;
-  --separator: rgba(220, 235, 228, 0.14);
+  --bg: #000000;
+  --surface: #1C1C1E;
+  --surface-2: #2C2C2E;
+  --text: #F2F2F7;
+  --muted: #ACACB3;
+  --separator: rgba(235, 235, 245, 0.16);
   --accent: #34D399;
   --accent-fill: #047857;
   --on-accent: #FFFFFF;
-  --accent-soft: rgba(52, 211, 153, 0.14);
+  --accent-soft: #203D34;
   --danger: #FF6B5E;
-  --danger-soft: rgba(255, 107, 94, 0.14);
+  --danger-soft: #452A2A;
+  --danger-on-teal: #FF8A80;
   --warning: #F5B54A;
   --income: #34D399;
-  --bar-bg: rgba(22, 28, 25, 0.82);
+  --teal: #22D3EE; --teal-fill: #0E7490; --teal-soft: #1D3D43;
+  --indigo: #A5B4FC; --indigo-fill: #4F46E5; --indigo-soft: #353746;
+  --violet: #C4B5FD; --violet-fill: #7C3AED; --violet-soft: #3A3846;
+  --amber: #FBBF24; --amber-fill: #B45309; --amber-soft: #44391F;
+  --pink: #F9A8D4; --pink-fill: #BE185D; --pink-soft: #44353F;
+  --chart-expense: #FF6B5E;
+  --segment-on: #636366;
+  --bar-bg: rgba(28, 28, 30, 0.82);
   --shadow: 0 1px 2px rgba(0, 0, 0, 0.4);
-  --backdrop: rgba(0, 0, 0, 0.55);
-  --hero-bg: linear-gradient(150deg, #065F46 0%, #064E3B 70%, #053D2E 100%);
+  --backdrop: rgba(0, 0, 0, 0.6);
+  --hero-bg: linear-gradient(150deg, #065F46 0%, #115E59 55%, #164E63 100%);
   --hero-shadow: 0 1px 2px rgba(0, 0, 0, 0.4);
 }
 
 @media (prefers-color-scheme: dark) {
   :root[data-theme="auto"] {
-    --bg: #0B0F0D;
-    --surface: #161C19;
-    --surface-2: #232B27;
-    --text: #EEF4F1;
-    --muted: #9EACA6;
-    --separator: rgba(220, 235, 228, 0.14);
+    --bg: #000000;
+    --surface: #1C1C1E;
+    --surface-2: #2C2C2E;
+    --text: #F2F2F7;
+    --muted: #ACACB3;
+    --separator: rgba(235, 235, 245, 0.16);
     --accent: #34D399;
     --accent-fill: #047857;
     --on-accent: #FFFFFF;
-    --accent-soft: rgba(52, 211, 153, 0.14);
+    --accent-soft: #203D34;
     --danger: #FF6B5E;
-    --danger-soft: rgba(255, 107, 94, 0.14);
+    --danger-soft: #452A2A;
+    --danger-on-teal: #FF8A80;
     --warning: #F5B54A;
     --income: #34D399;
-    --bar-bg: rgba(22, 28, 25, 0.82);
+    --teal: #22D3EE; --teal-fill: #0E7490; --teal-soft: #1D3D43;
+    --indigo: #A5B4FC; --indigo-fill: #4F46E5; --indigo-soft: #353746;
+    --violet: #C4B5FD; --violet-fill: #7C3AED; --violet-soft: #3A3846;
+    --amber: #FBBF24; --amber-fill: #B45309; --amber-soft: #44391F;
+    --pink: #F9A8D4; --pink-fill: #BE185D; --pink-soft: #44353F;
+    --chart-expense: #FF6B5E;
+    --segment-on: #636366;
+    --bar-bg: rgba(28, 28, 30, 0.82);
     --shadow: 0 1px 2px rgba(0, 0, 0, 0.4);
-    --backdrop: rgba(0, 0, 0, 0.55);
-    --hero-bg: linear-gradient(150deg, #065F46 0%, #064E3B 70%, #053D2E 100%);
+    --backdrop: rgba(0, 0, 0, 0.6);
+    --hero-bg: linear-gradient(150deg, #065F46 0%, #115E59 55%, #164E63 100%);
     --hero-shadow: 0 1px 2px rgba(0, 0, 0, 0.4);
   }
 }
@@ -253,9 +278,7 @@ button.row:active, a.row:active { background: var(--surface-2); }
 .chip[aria-pressed="true"] .chip__dot { box-shadow: 0 0 0 2px #fff; }
 .segmented { display: flex; background: var(--surface-2); border-radius: 10px; padding: 2px; margin: 0 0 16px; }
 .segmented button { flex: 1; min-height: 36px; border: 0; background: transparent; border-radius: 8px; font-size: 15px; font-weight: 500; color: var(--text); padding: 0 6px; }
-.segmented button[aria-pressed="true"] { background: var(--surface); box-shadow: 0 1px 3px rgba(0,0,0,.15); font-weight: 600; }
-:root[data-theme="dark"] .segmented button[aria-pressed="true"] { background: #3A4540; }
-@media (prefers-color-scheme: dark) { :root[data-theme="auto"] .segmented button[aria-pressed="true"] { background: #3A4540; } }
+.segmented button[aria-pressed="true"] { background: var(--segment-on); box-shadow: 0 1px 3px rgba(0,0,0,.15); font-weight: 600; }
 
 /* Campi dei moduli */
 .form-group { background: var(--surface); border-radius: var(--radius); margin: 0 0 20px; overflow: hidden; }
@@ -352,7 +375,7 @@ textarea.input { min-height: 72px; resize: vertical; line-height: 1.4; }
 /* Toast e banner */
 .toast-root { position: fixed; left: 0; right: 0; bottom: calc(var(--tabbar-h) + 28px + var(--safe-bottom)); z-index: 70; display: flex; flex-direction: column; align-items: center; gap: 8px; pointer-events: none; padding: 0 16px; }
 .toast {
-  pointer-events: auto; display: flex; align-items: center; gap: 12px; background: #1F2A25; color: #fff; border-radius: 24px;
+  pointer-events: auto; display: flex; align-items: center; gap: 12px; background: #2C2C2E; color: #fff; border-radius: 24px;
   padding: 10px 10px 10px 18px; min-height: 44px; font-size: 15px; box-shadow: 0 6px 24px rgba(0,0,0,.25); animation: pop .2s ease; max-width: 100%;
 }
 .toast--error { background: #8E1B17; }
@@ -379,7 +402,7 @@ textarea.input { min-height: 72px; resize: vertical; line-height: 1.4; }
 .tab[aria-current="page"] .tab__label { font-weight: 600; }
 .fab {
   position: fixed; z-index: 31; right: 12px; bottom: calc(12px + var(--safe-bottom)); width: var(--tabbar-h); height: var(--tabbar-h); border-radius: 50%;
-  border: 0; background: var(--accent-fill); color: var(--on-accent); display: grid; place-items: center; box-shadow: 0 6px 20px rgba(4,120,87,.4);
+  border: 0; background: var(--accent-fill); color: var(--on-accent); display: grid; place-items: center; box-shadow: 0 6px 20px rgba(4,120,87,.35);
 }
 .fab svg { width: 30px; height: 30px; }
 .fab:active { transform: scale(.94); }
@@ -425,10 +448,11 @@ textarea.input { min-height: 72px; resize: vertical; line-height: 1.4; }
 .chart text { fill: var(--muted); font-family: var(--font); }
 .chart .chart__center { fill: var(--text); font-family: var(--font-num); font-weight: 600; }
 .chart .chart__grid { stroke: var(--separator); }
-.chart .chart__line { stroke: var(--accent); }
-.chart .chart__area { fill: var(--accent-soft); }
-.chart .chart__income { fill: var(--accent); }
-.chart .chart__expense { fill: var(--muted); opacity: .55; }
+.chart .chart__line { stroke: var(--teal); }
+.chart .chart__area { fill: var(--teal); fill-opacity: .14; }
+.chart .chart__dot { fill: var(--teal); }
+.chart .chart__income { fill: var(--income); }
+.chart .chart__expense { fill: var(--chart-expense); }
 .chart .chart__empty { stroke: var(--surface-2); }
 .legend { list-style: none; margin: 8px 0 0; padding: 0; }
 .legend li { font-size: 15px; }
@@ -439,8 +463,8 @@ textarea.input { min-height: 72px; resize: vertical; line-height: 1.4; }
 .legend span:last-child { font-variant-numeric: tabular-nums; color: var(--muted); white-space: nowrap; }
 .legend-keys { display: flex; gap: 14px; font-size: 13px; color: var(--muted); margin: 0 0 6px; }
 .legend-keys span { display: inline-flex; gap: 6px; align-items: center; }
-.key { width: 10px; height: 10px; border-radius: 3px; background: var(--accent); }
-.key--exp { background: var(--muted); opacity: .55; }
+.key { width: 10px; height: 10px; border-radius: 3px; background: var(--income); }
+.key--exp { background: var(--chart-expense); }
 
 .year-switch { display: flex; align-items: center; justify-content: center; gap: 8px; margin: 0 0 16px; }
 .year-switch strong { font-size: 20px; min-width: 70px; text-align: center; font-variant-numeric: tabular-nums; }
@@ -466,8 +490,8 @@ textarea.input { min-height: 72px; resize: vertical; line-height: 1.4; }
   .topbar.is-compact, .tabbar { background: var(--surface); -webkit-backdrop-filter: none; backdrop-filter: none; }
 }
 @media (prefers-contrast: more) {
-  :root { --separator: rgba(0, 0, 0, 0.45); --muted: #3B4641; }
-  :root[data-theme="dark"] { --separator: rgba(255, 255, 255, 0.5); --muted: #C9D3CF; }
+  :root { --separator: rgba(0, 0, 0, 0.45); --muted: #3C3C43; }
+  :root[data-theme="dark"] { --separator: rgba(255, 255, 255, 0.5); --muted: #D1D1D6; }
   .chip, .btn, .list, .card { border: 1px solid var(--separator); }
 }
 .list--flat { background: transparent; margin: 0 -16px; border-radius: 0; }
@@ -550,3 +574,40 @@ a.card:active { opacity: .8; }
 body:has(.sheet) .toast-root { bottom: auto; top: calc(var(--safe-top) + 24px + 76px); }
 /* Un toast senza pulsante non si tocca: lascia passare i tocchi ai controlli che copre. */
 .toast:not(:has(button)) { pointer-events: none; }
+
+/* ---- Design v3: smeraldo principale, grigi neutri, colori complementari per ambito ---- */
+
+/* Card con tinta: riquadro con glifo bianco nell'intestazione, titolo e link nel colore della tinta. */
+.card--t-emerald, .section--t-emerald { --tint: var(--accent); --tint-fill: var(--accent-fill); --tint-soft: var(--accent-soft); }
+.card--t-teal, .section--t-teal { --tint: var(--teal); --tint-fill: var(--teal-fill); --tint-soft: var(--teal-soft); }
+.card--t-indigo, .section--t-indigo { --tint: var(--indigo); --tint-fill: var(--indigo-fill); --tint-soft: var(--indigo-soft); }
+.card--t-violet, .section--t-violet { --tint: var(--violet); --tint-fill: var(--violet-fill); --tint-soft: var(--violet-soft); }
+.card--t-amber, .section--t-amber { --tint: var(--amber); --tint-fill: var(--amber-fill); --tint-soft: var(--amber-soft); }
+.card--t-pink, .section--t-pink { --tint: var(--pink); --tint-fill: var(--pink-fill); --tint-soft: var(--pink-soft); }
+.card__title { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.card__badge { flex: none; width: 24px; height: 24px; border-radius: 7px; display: grid; place-items: center; background: var(--c, var(--tint-fill, var(--accent-fill))); color: #fff; }
+.card__badge svg { width: 15px; height: 15px; }
+[class*="card--t-"] > .card__head .card__title { color: var(--tint); }
+[class*="card--t-"] > .card__head .card__link { color: var(--tint); }
+[class*="section--t-"] > .section-header, [class*="section--t-"] > .section-header a, [class*="section--t-"] > .section-header button { color: var(--tint); }
+.ledger__title { color: var(--tint, var(--muted)); }
+.card.card--t-indigo .note > svg { color: var(--indigo); }
+.tag--tint { background: var(--tint-soft); color: var(--tint); }
+
+/* Riquadri del mese: entrate verdi, uscite rosse tenui, risparmio laguna. */
+.stat--income { background: var(--accent-soft); }
+.stat--expense { background: var(--danger-soft); }
+.stat--rate { background: var(--teal-soft); }
+.stat--rate .stat__value { color: var(--teal); }
+.stat--rate .stat__value.is-danger { color: var(--danger-on-teal); }
+
+/* Pulsanti colorati per ambito: crypto (ambra) e obiettivi (magenta). Bianco su pieno ≥ 5,02:1. */
+.btn--gold { background: var(--amber-fill); color: #fff; }
+.btn--gold-soft { background: var(--amber-soft); color: var(--amber); }
+.btn--pink { background: var(--pink-fill); color: #fff; }
+.btn--pink-soft { background: var(--pink-soft); color: var(--pink); }
+.field__hint.calc--gold { background: var(--amber-soft); color: var(--text); }
+
+/* Obiettivi: etichette di scadenza magenta tenue; Metti da parte con l'icona magenta. */
+.tag--goal { background: var(--pink-soft); color: var(--pink); }
+.sheet-intro__icon--pink { background: var(--pink-fill); color: #fff; }

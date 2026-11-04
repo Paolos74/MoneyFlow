@@ -32,7 +32,7 @@ export function openSetAsideSheet(ctx, { date }) {
         el('div', { class: 'setaside__bar' }, progress(cur.saved / cur.target, { color: g.color })));
     });
     return [
-      el('div', { class: 'sheet-intro' }, el('span', { class: 'sheet-intro__icon' }, icon('target')),
+      el('div', { class: 'sheet-intro' }, el('span', { class: 'sheet-intro__icon sheet-intro__icon--pink' }, icon('target')),
         el('p', { text: 'Hai registrato lo stipendio: vuoi mettere da parte le quote dei tuoi obiettivi? I soldi restano sul conto, l\'obiettivo tiene il conto.' })),
       ...rows,
     ];

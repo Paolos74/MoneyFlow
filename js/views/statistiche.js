@@ -38,16 +38,16 @@ export function render(root, ctx) {
   const movHref = (extra = '') => `#movimenti?${periodQuery}${extra}`;
 
   const t = C.totals(state, from, to);
-  root.append(card({ title: 'Nel periodo' },
+  root.append(card({ title: 'Nel periodo', tint: 'teal', icon: 'chart' },
     el('div', { class: 'stats' },
-      el('div', { class: 'stat' }, el('div', { class: 'stat__label', text: 'Entrate' }), el('div', { class: 'stat__value is-income', id: 'st-income', text: formatEuro(t.income) })),
-      el('div', { class: 'stat' }, el('div', { class: 'stat__label', text: 'Uscite' }), el('div', { class: 'stat__value', id: 'st-expense', text: formatEuro(t.expense) })),
-      el('div', { class: 'stat' }, el('div', { class: 'stat__label', text: 'Risparmio' }), el('div', { class: `stat__value ${t.rate < 0 ? 'is-danger' : ''}`, id: 'st-rate', text: formatPercent(t.rate) }))),
+      el('div', { class: 'stat stat--income' }, el('div', { class: 'stat__label', text: 'Entrate' }), el('div', { class: 'stat__value is-income', id: 'st-income', text: formatEuro(t.income) })),
+      el('div', { class: 'stat stat--expense' }, el('div', { class: 'stat__label', text: 'Uscite' }), el('div', { class: 'stat__value', id: 'st-expense', text: formatEuro(t.expense) })),
+      el('div', { class: 'stat stat--rate' }, el('div', { class: 'stat__label', text: 'Risparmio' }), el('div', { class: `stat__value ${t.rate < 0 ? 'is-danger' : ''}`, id: 'st-rate', text: formatPercent(t.rate) }))),
     el('p', { class: 'hero__sub', text: 'Uscite al netto delle quote escluse. Trasferimenti e restituzioni non contano.' })));
 
   // Ciambella
   const cats = C.byCategory(state, from, to, 'uscita');
-  root.append(card({ title: 'Uscite per categoria' },
+  root.append(card({ title: 'Uscite per categoria', tint: 'amber', icon: 'tag' },
     el('div', { class: 'chart chart--donut', id: 'chart-donut' }, svgNode(donut(cats.map((c) => ({ label: `${c.label}: ${formatEuro(c.value)}`, value: c.value, color: c.color })), { thickness: 26, center: formatEuro(t.expense), centerSub: 'uscite', label: 'Uscite per categoria' }))),
     cats.length ? el('ul', { class: 'legend', id: 'legend-donut' }, cats.map((c) => el('li', { attrs: { 'data-category': c.categoryId } },
       el('a', { class: 'legend__link', href: movHref(`&categoria=${encodeURIComponent(c.categoryId)}`), attrs: { 'aria-label': `${c.label}: vedi i movimenti` } },
@@ -59,16 +59,16 @@ export function render(root, ctx) {
   if (months.length < 2) months = monthsBetween(addMonthsYM(monthOf(to), -5), monthOf(to));
   if (months.length > 24) months = months.slice(-24);
   const bm = C.byMonth(state, months);
-  root.append(card({ title: 'Entrate e uscite per mese' },
+  root.append(card({ title: 'Entrate e uscite per mese', tint: 'teal', icon: 'chart' },
     el('div', { class: 'legend-keys' }, el('span', {}, el('span', { class: 'key' }), 'Entrate'), el('span', {}, el('span', { class: 'key key--exp' }), 'Uscite')),
     el('div', { class: 'chart', id: 'chart-bars' }, svgNode(bars(bm.map((m) => ({ label: monthShortLabel(m.month), income: m.income, expense: m.expense })), { format: formatEuro })))));
 
   const nws = C.netWorthSeries(state, months);
-  root.append(card({ title: 'Andamento del patrimonio (conti in euro)' },
+  root.append(card({ title: 'Andamento del patrimonio (conti in euro)', tint: 'emerald', icon: 'wallet' },
     el('div', { class: 'chart', id: 'chart-line' }, svgNode(line(nws.map((p) => ({ label: monthShortLabel(p.month), value: p.eurCents })), { format: shortEuro, label: 'Patrimonio a fine mese' }))),
     el('p', { class: 'hero__sub', text: 'Saldo a fine mese. Le crypto restano fuori dal totale in euro.' })));
 
-  root.append(section({ title: 'Tasso di risparmio per mese' }, list(...bm.slice().reverse().map((m) => row({
+  root.append(section({ title: 'Tasso di risparmio per mese', cls: 'section--t-teal' }, list(...bm.slice().reverse().map((m) => row({
     title: monthLabel(m.month), subtitle: `Entrate ${formatEuro(m.income)} · uscite ${formatEuro(m.expense)}`,
     value: m.income ? formatPercent(m.rate) : '—', valueClass: m.rate < 0 ? 'is-danger' : '',
     href: `#movimenti?periodo=custom&da=${monthStart(m.month)}&a=${monthEnd(m.month)}`, attrs: { 'data-rate-month': m.month },
@@ -76,12 +76,12 @@ export function render(root, ctx) {
 
   // Abbonamenti e ricorrenti
   const rs = C.recurringSummary(state, today);
-  root.append(section({ title: 'Abbonamenti e ricorrenti', action: el('a', { href: '#programmati', text: 'Gestisci' }) },
+  root.append(section({ title: 'Abbonamenti e ricorrenti', cls: 'section--t-violet', action: el('a', { href: '#programmati', text: 'Gestisci' }) },
     rs.items.length ? list(
       row({ title: 'Al mese', value: formatEuro(rs.monthly), id: 'rec-monthly' }),
       row({ title: 'All\'anno', value: formatEuro(rs.yearly), id: 'rec-yearly' }),
       ...rs.items.map((i) => row({ icon: 'repeat', color: C.scheduledColor(state, i.sched), planned: true, title: scheduledTitle(state, i.sched), subtitle: freqLabel(i.sched), value: formatEuro(i.monthly), valueSub: 'al mese', href: `#programmati/${i.sched.id}` })))
       : emptyState({ icon: 'repeat', title: 'Nessun abbonamento', text: 'Le uscite programmate ripetute compaiono qui con il costo al mese e all\'anno.' })));
 
-  root.append(section({}, list(row({ icon: 'doc', color: '#4F46E5', title: 'Stipendio e tasse', subtitle: 'Busta paga, stima IRPEF e addizionali', href: '#statistiche/stipendio', id: 'link-salary' }))));
+  root.append(section({}, list(row({ icon: 'doc', color: 'var(--indigo-fill)', title: 'Stipendio e tasse', subtitle: 'Busta paga, stima IRPEF e addizionali', href: '#statistiche/stipendio', id: 'link-salary' }))));
 }

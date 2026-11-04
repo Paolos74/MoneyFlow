@@ -3,20 +3,23 @@
 PWA statica personale per un'utente italiana non sviluppatrice: spese, entrate, stipendio, conti in euro e crypto, calendario, pagamenti programmati, budget, obiettivi, statistiche, backup/CSV, sync Firebase facoltativa.
 Metodo e stack: `PWA-BASE.md` (vincolante). Decisioni dell'utente: `MONEYFLOW-DECISIONI.md` (D1–D24, A–I) e `MONEYFLOW-V2-DECISIONI.md` (v2, vince in caso di conflitto); qui c'è solo ciò che serve per lavorare sul codice.
 
-- Versione: `moneyflow-v2` (`VERSION` in `sw.js`), branch `moneyflow-v2`.
-- v1 pubblicata: commit `1b7670200c1609d60d48bc1b3ece0e918705c0a5`. Lo zip della v2 = `git diff --name-only 1b7670200c1609d60d48bc1b3ece0e918705c0a5 HEAD` (senza `.agents/`, `docs/`). Per il rilascio successivo usare lo sha di `main` dopo il merge `--ff-only` della v2 (`git log -1 main`).
+- Versione: `moneyflow-v3` (`VERSION` in `sw.js`), branch `moneyflow-v3` (solo design: palette, colori per sezione, icona dell'app).
+- v2 pubblicata: commit `e75ed030f88cd297ce21aa2869ce8c8c07ec7f83`. Lo zip della v3 = `git diff --name-only e75ed030f88cd297ce21aa2869ce8c8c07ec7f83 HEAD` (senza `.agents/`, `docs/`); file da cancellare su GitHub = `git diff --name-status e75ed030f88cd297ce21aa2869ce8c8c07ec7f83 HEAD | grep ^D` (le 5 icone vecchie). Per il rilascio successivo usare lo sha di `main` dopo il merge `--ff-only` della v3 (`git log -1 main`).
 - Nessun riferimento al lavoro dell'utente nei file (controllato da `tests/static.test.js`).
 
 ## Comandi
 - Test: `node --test tests/*.test.js`
 - Sintassi: `for f in $(git ls-files -co --exclude-standard '*.js'); do node --check "$f" || exit 1; done`
-- Icone: `python3 tools/make_icons.py`
+- Icone: `python3 tools/make_icons.py` → `icons/moneyflow-v3-{192,512,maskable-512,apple-touch-180,favicon-32}.png` (nomi con la versione, così i telefoni non riusano l'icona vecchia; a ogni nuovo disegno cambiare il nome, aggiornare manifest, `index.html`, `offline.html`, ASSETS e `tests/static.test.js`)
 - PDF sintetici della busta paga (dati inventati) per i test: `python3 tools/make_payslip_pdf.py` → `tests/fixtures/busta-paga-sintetica.pdf` e `busta-paga-sintetica-cid.pdf`
 - Browser: dalla cartella sopra `python3 -m http.server 8765` → `http://localhost:8765/moneyflow/`
 
 ## File principali
 `js/money.js` (centesimi, quantità 1e-8, `tradeEuroCents`, percentuali in punti base), `js/dates.js` (date locali, periodi D8), `js/recurrence.js`, `js/store.js` (modello, validazione, tombstone), `js/calc.js` (aggregati puri), `js/csv.js`, `js/backup.js`, `js/sync.js` (+ `js/firebase-config.js`), `js/prefs.js`, `js/theme-boot.js`, `js/ui.js`, `js/charts.js`, `js/icons.js`, `js/app.js` (router, SW, banner), `js/views/*.js` (una vista per schermata; `parts.js` pezzi condivisi; `movimento-form.js` tutti i fogli di inserimento, compresi Compra/Vendi e il modulo busta paga).
 Nuovi in v2: `js/tax-tables.js` (scaglioni e detrazioni per anno, solo dati: per un anno nuovo aggiungere una voce), `js/tax.js` (stima IRPEF, conguaglio, addizionali), `js/tax-settings.js` (impostazioni della stima), `js/pension.js` (simulatore fondo pensione), `js/pdf-text.js` (lettore PDF minimo: FlateDecode con `DecompressionStream`, object stream, ToUnicode), `js/payslip.js` (voci della busta: I01, I21, 900, 60450, riga Ferie, NETTO A PAGARE, mese/anno), `js/views/metti-da-parte.js`, `js/views/fondo-pensione.js`.
+
+## Design v3 (colori)
+Smeraldo = colore principale (azioni, +, scheda attiva, Patrimonio, Conti, Da ricevere, entrate); grigi neutri iOS (`--bg #F2F2F7`/`#000000`). Colori complementari in `css/app.css`, ognuno con testo, pieno (`-fill`, testo bianco) e tenue opaco (`-soft`): laguna `--teal` (mese, periodo, grafici per mese, linea del patrimonio), indaco `--indigo` (stipendio e tasse, fondo pensione), viola `--violet` (programmati, da confermare), ambra `--amber` (budget, uscite per categoria, Compra/Vendi), magenta `--pink` (obiettivi, Metti da parte). `card({ tint, icon, color })` mette la tinta e il riquadro col glifo nell'intestazione; `section({ cls: 'section--t-<tinta>' })` colora l'intestazione. Verde/rosso dei valori e colori di conti e categorie invariati. Contrasti WCAG calcolati nella specifica `/projects/sandbox/.agents/tasks/moneyflow-v3/SPEC.md` (fuori dal repository).
 
 ## Chiavi localStorage
 - `moneyflow:data` — `{ app:'MoneyFlow', schemaVersion:1, accounts, categories, movements, scheduled, goals }`
@@ -80,6 +83,7 @@ Respinti dall'utente (non riproporre): 7 pulsante "Tutto" sulla restituzione (re
 Altre scelte tecniche: niente `preventDefault` su `beforeinstallprompt` (resta il banner di Chrome, più il pulsante Installa nelle Impostazioni); conferma di un programmato precompila l'importo scritto nel programmato (D18), voci recenti e restituzioni no (D4).
 
 ## Cosa non è stato provato
+- **Icona v3 su un telefono vero:** provati solo manifest letto da Chrome headless e dimensioni dei PNG; l'aggiornamento dell'icona di un'app già installata (Android WebAPK, iPhone) non è provato.
 - **PDF reale della busta paga:** non è nella sandbox. Il lettore è provato solo con due PDF sintetici (dati inventati) generati da `tools/make_payslip_pdf.py`, con il testo simile alle righe descritte nelle decisioni v2. Va provato dall'utente sul telefono.
 - Formule fiscali: provate su esempi calcolati a mano (`tests/tax.test.js`, `tests/pension.test.js`), non confrontate con una CU o un 730 veri.
 - Firebase reale (nessun accesso a internet): la sync è provata solo con un `fetch` simulato nei test; in browser si è visto solo il messaggio "Impossibile raggiungere Firebase".

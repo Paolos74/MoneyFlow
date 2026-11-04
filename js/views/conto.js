@@ -19,7 +19,7 @@ export function render(root, ctx) {
   const edit = el('button', { class: 'topbar__btn', type: 'button', text: 'Modifica', id: 'acc-edit', on: { click: () => openAccountForm(ctx, a) } });
   ctx.header({ title: a.name, back: { href: '#conti', label: 'Conti' }, actions: [edit] });
   const bal = C.accountBalance(state, a.id);
-  root.append(card({ title: a.kind === 'crypto' ? `Quantità · ${a.asset}` : 'Saldo' },
+  root.append(card({ title: a.kind === 'crypto' ? `Quantità · ${a.asset}` : 'Saldo', icon: a.kind === 'crypto' ? 'coin' : 'wallet', color: a.color },
     el('p', { class: `hero__value ${bal < 0 ? 'is-danger' : ''}`, id: 'acc-balance', text: amountIn(state, a.id, bal) }),
     el('p', { class: 'hero__sub', text: `Saldo iniziale ${amountIn(state, a.id, a.initial)}${a.kind === 'crypto' ? ' · nessun prezzo in euro' : ''}` })));
   const actions = [];
@@ -29,8 +29,8 @@ export function render(root, ctx) {
   } else {
     // Compra/Vendi: servono almeno un conto in euro.
     if (C.sortedAccounts(state).some((x) => x.kind === 'eur')) {
-      actions.push(button('Compra', () => openTradeForm(ctx, { side: 'compra', cryptoAccountId: a.id }), { kind: 'primary', icon: 'down', small: true, id: 'acc-buy' }));
-      actions.push(button('Vendi', () => openTradeForm(ctx, { side: 'vendi', cryptoAccountId: a.id }), { icon: 'up', small: true, id: 'acc-sell' }));
+      actions.push(button('Compra', () => openTradeForm(ctx, { side: 'compra', cryptoAccountId: a.id }), { kind: 'gold', icon: 'down', small: true, id: 'acc-buy' }));
+      actions.push(button('Vendi', () => openTradeForm(ctx, { side: 'vendi', cryptoAccountId: a.id }), { kind: 'gold-soft', icon: 'up', small: true, id: 'acc-sell' }));
     }
     actions.push(button('Variazione quantità', () => openMovementForm(ctx, { preset: { type: 'variazione', accountId: a.id } }), { icon: 'coin', small: true, id: 'acc-var' }));
   }

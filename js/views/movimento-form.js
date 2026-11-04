@@ -523,7 +523,7 @@ export function openTradeForm(ctx, { side = 'compra', cryptoAccountId = null, mo
       field({ label: `Prezzo di 1 ${asset} (€)`, field: 'price', id: 't-price',
         input: input({ id: 't-price', value: d.priceText, inputmode: 'decimal', placeholder: '0,00', onInput: (v) => { d.priceText = v; refresh(); } }) }),
       field({ label: buy ? 'Importo pagato (€)' : 'Importo ricevuto (€)', field: 'amount', id: 't-amount',
-        hint: el('p', { class: 'field__hint calc', id: 't-calc', text: calcText() }),
+        hint: el('p', { class: 'field__hint calc calc--gold', id: 't-calc', text: calcText() }),
         input: input({ id: 't-amount', value: d.amountText, inputmode: 'decimal', placeholder: '0,00', cls: 'input--amount', onInput: (v) => {
           const c = calc();
           const was = d.amountEdited;

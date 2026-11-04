@@ -27,7 +27,7 @@ export function render(root, ctx) {
 
   // Il "Lordo" della v1 (gross) vale come Competenze lorde.
   const y = C.salaryYear(state, year);
-  root.append(card({ title: `Totali ${year}` },
+  root.append(card({ title: `Totali ${year}`, tint: 'indigo', icon: 'doc' },
     kv('Competenze lorde', formatEuro(y.gross), 'sal-gross'),
     kv('Contributi a carico', formatEuro(y.contributions), 'sal-contrib'),
     kv('Imponibile fiscale', formatEuro(y.taxable), 'sal-taxable'),
@@ -38,7 +38,7 @@ export function render(root, ctx) {
 
   renderEstimate(root, ctx, year, y);
 
-  root.append(section({}, list(row({ icon: 'coin', color: '#047857', title: 'Se aumento il fondo pensione', subtitle: 'Quanto costa al mese e quante tasse risparmi', href: '#impostazioni/fondo-pensione', id: 'link-pension' }))));
+  root.append(section({}, list(row({ icon: 'coin', color: 'var(--indigo-fill)', title: 'Se aumento il fondo pensione', subtitle: 'Quanto costa al mese e quante tasse risparmi', href: '#impostazioni/fondo-pensione', id: 'link-pension' }))));
 
   const stip = C.sortedCategories(state, 'entrata').find((c) => c.role === 'stipendio');
   if (!y.rows.length) {
@@ -112,7 +112,7 @@ function renderEstimate(root, ctx, year, y) {
   body.push(el('div', { class: 'note note--info' }, icon('info'), el('div', {}, disclaimer,
     el('p', { text: 'Non considera: la somma esente del cuneo fiscale fino a 20.000 €, il trattamento integrativo, le detrazioni per familiari a carico, oneri e spese detraibili (es. mediche), altri redditi, le imposte sostitutive (es. 15% su notturni e turni, 5% sugli aumenti contrattuali) che non sono nell\'imponibile I01.' }))),
     el('div', { class: 'btn-row' }, settingsBtn));
-  root.append(card({ title: `Stima delle tasse ${year}`, cls: 'card--estimate', link: el('span', { class: 'tag tag--accent', text: 'Stima' }) }, ...body));
+  root.append(card({ title: `Stima delle tasse ${year}`, cls: 'card--estimate', tint: 'indigo', icon: 'gauge', link: el('span', { class: 'tag tag--tint', text: 'Stima' }) }, ...body));
 }
 
 function openTaxSettings(ctx, year) {

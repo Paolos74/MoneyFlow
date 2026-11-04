@@ -17,7 +17,7 @@ export function render(root, ctx) {
   }
   const p = C.goalProgress(g, ctx.today());
   ctx.header({ title: g.name, back: { href: '#conti/obiettivi', label: 'Obiettivi' }, actions: [el('button', { class: 'topbar__btn', type: 'button', text: 'Modifica', id: 'goal-edit', on: { click: () => openGoalForm(ctx, g) } })] });
-  root.append(card({ title: 'Messo da parte', link: p.done ? el('span', { class: 'tag tag--done', id: 'goal-done', text: 'Completato ✓' }) : null },
+  root.append(card({ title: 'Messo da parte', tint: 'pink', icon: 'target', link: p.done ? el('span', { class: 'tag tag--done', id: 'goal-done', text: 'Completato ✓' }) : null },
     el('p', { class: 'hero__value', id: 'goal-saved', text: formatEuro(g.saved) }),
     el('p', { class: 'hero__sub', text: `di ${formatEuro(g.target)} · ${formatPercent(p.pct)}` }),
     progress(g.saved / g.target, { color: g.color }),
@@ -28,8 +28,8 @@ export function render(root, ctx) {
     p.expired ? el('p', { class: 'hero__sub is-danger', text: 'Scadenza passata: modifica la data o l\'importo.' }) : null,
     p.done ? el('p', { class: 'hero__sub', text: 'Per riaprirlo alza la cifra con Modifica o usa Togli.' }) : null));
   root.append(el('div', { class: 'btn-row section' },
-    button('Aggiungi', () => adjust(ctx, g, 1), { kind: 'primary', icon: 'plus', id: 'goal-add' }),
-    button('Togli', () => adjust(ctx, g, -1), { id: 'goal-remove', disabled: g.saved === 0 })));
+    button('Aggiungi', () => adjust(ctx, g, 1), { kind: 'pink', icon: 'plus', id: 'goal-add' }),
+    button('Togli', () => adjust(ctx, g, -1), { kind: 'pink-soft', id: 'goal-remove', disabled: g.saved === 0 })));
   root.append(el('div', { class: 'section' }, list(el('button', { type: 'button', class: 'row row--danger row--noicon', id: 'goal-delete', text: 'Elimina obiettivo', on: { click: () => {
     if (attempt(() => ctx.store.deleteGoal(g.id))) { ctx.go('conti/obiettivi'); toast('Obiettivo eliminato', { undo: () => ctx.store.restoreGoal(g.id) }); }
   } } }))));

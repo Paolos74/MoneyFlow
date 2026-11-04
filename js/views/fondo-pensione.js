@@ -62,7 +62,7 @@ function compute(ctx, d, year) {
     if (e instanceof ValidationError) return [card({ title: 'Risultato' }, el('p', { class: 'is-danger', id: 'pf-error', text: e.message }))];
     throw e;
   }
-  return [card({ title: `Dal ${formatPercentBp(currentBp)} al ${formatPercentBp(newBp)}` },
+  return [card({ title: `Dal ${formatPercentBp(currentBp)} al ${formatPercentBp(newBp)}`, tint: 'indigo', icon: 'coin' },
     el('p', { class: 'hero__label', text: 'Il netto in busta scende di circa' }),
     el('p', { class: 'hero__value', id: 'pf-net-drop', text: formatEuro(r.netDropPerMonth) }),
     el('p', { class: 'hero__sub', text: `per mensilità (${d.months} l'anno), perché parte del contributo in più torna come IRPEF in meno.` }),
