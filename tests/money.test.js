@@ -1,7 +1,7 @@
 // Test di js/money.js: importi in centesimi, quantità crypto, percentuali.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { parseEuroInput, formatEuro, formatEuroPlain, parseQtyInput, formatQty, formatQtyPlain, percentTenths, formatPercent, formatEuroSigned, tradeEuroCents, parsePercentInput, formatPercentBp } from '../js/money.js';
+import { parseEuroInput, formatEuro, formatEuroPlain, parseQtyInput, formatQty, formatQtyPlain, percentTenths, formatPercent, formatEuroSigned } from '../js/money.js';
 
 const NB = '\u00A0';
 
@@ -61,34 +61,4 @@ test('percentuali in decimi, totale 0 → 0', () => {
   assert.equal(percentTenths(5, 0), 0);
   assert.equal(formatPercent(980), '98,0%');
   assert.equal(formatPercent(-55), '-5,5%');
-});
-
-test('tradeEuroCents: quantità × prezzo con arrotondamento metà in su', () => {
-  // 0,01 BTC × 60.000,00 € = 1.000.000 × 6.000.000 / 1e8 = 60.000 cent
-  assert.equal(tradeEuroCents(1000000, 6000000), 60000);
-  // 0,00012345 × 61.234,56 € = 12.345 × 6.123.456 = 75.594.064.320 / 1e8 = 755,94 → 756
-  assert.equal(tradeEuroCents(12345, 6123456), 756);
-  // 0,5 × 1 cent = 0,5 → 1; 0,5 × 3 cent = 1,5 → 2
-  assert.equal(tradeEuroCents(50000000, 1), 1);
-  assert.equal(tradeEuroCents(50000000, 3), 2);
-  // 21.000.000 BTC × 100.000.000,00 € → oltre il massimo sicuro
-  assert.equal(tradeEuroCents(21000000 * 100000000, 10000000000), null);
-  assert.equal(tradeEuroCents(0, 6000000), null);
-  assert.equal(tradeEuroCents(-5, 6000000), null);
-  assert.equal(tradeEuroCents(1000000, 0), null);
-});
-
-test('parsePercentInput e formatPercentBp: punti base interi', () => {
-  assert.equal(parsePercentInput('1,73'), 173);
-  assert.equal(parsePercentInput('1.73'), 173);
-  assert.equal(parsePercentInput('0,8'), 80);
-  assert.equal(parsePercentInput('2'), 200);
-  assert.equal(parsePercentInput(' 1,73 %'), 173);
-  assert.equal(parsePercentInput('10'), 1000);
-  assert.equal(parsePercentInput('1,734'), null);
-  assert.equal(parsePercentInput('11'), null);
-  assert.equal(parsePercentInput(''), null);
-  assert.equal(parsePercentInput(null), null);
-  assert.equal(formatPercentBp(173), '1,73%');
-  assert.equal(formatPercentBp(80), '0,80%');
 });

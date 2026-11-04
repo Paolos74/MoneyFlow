@@ -25,7 +25,7 @@ export function render(root, ctx) {
 function renderAccounts(root, ctx, state) {
   const accounts = C.sortedAccounts(state);
   const nw = C.netWorth(state);
-  root.append(card({ title: 'Patrimonio in euro', cls: 'card--hero' },
+  root.append(card({ title: 'Patrimonio in euro' },
     el('p', { class: 'hero__value', id: 'conti-total', text: formatEuro(nw.eurCents) }),
     nw.crypto.length ? el('p', { class: 'hero__sub', text: `${C.cryptoLine(nw)} · senza valore in euro` }) : null));
   if (!accounts.length) {
@@ -51,23 +51,14 @@ function renderGoals(root, ctx, state) {
       action: button('Nuovo obiettivo', () => openGoalForm(ctx), { kind: 'primary', id: 'goal-new-empty' }) }));
     return;
   }
-  const goalCard = (g) => {
+  for (const g of goals) {
     const p = C.goalProgress(g, today);
-    const note = p.done ? 'Obiettivo raggiunto'
-      : p.quota ? `${formatEuro(p.monthSaved)} di ${formatEuro(p.quota)} questo mese`
-        : p.monthly ? `Metti da parte ${formatEuro(p.monthly)} al mese per ${p.monthsLeft} ${p.monthsLeft === 1 ? 'mese' : 'mesi'}` : `Mancano ${formatEuro(p.remaining)}`;
-    return el('a', { class: 'card', href: `#obiettivi/${g.id}`, attrs: { 'data-goal': g.id } },
-      el('div', { class: 'card__head' }, el('h2', { class: 'goal__title', text: g.name }),
-        el('span', { class: 'tag' + (p.done ? ' tag--done' : ''), text: p.done ? 'Completato ✓' : p.expired ? 'Scaduto' : g.deadline ? `entro ${formatDateIt(g.deadline)}` : 'senza scadenza' })),
+    root.append(el('a', { class: 'card', href: `#obiettivi/${g.id}`, attrs: { 'data-goal': g.id } },
+      el('div', { class: 'card__head' }, el('h2', { class: 'goal__title', text: g.name }), el('span', { class: 'tag', text: p.done ? 'Raggiunto' : p.expired ? 'Scaduto' : g.deadline ? `entro ${formatDateIt(g.deadline)}` : 'senza scadenza' })),
       el('div', { class: 'meter__top' }, el('span', { class: 'num', text: formatEuro(g.saved) }), el('span', { text: `di ${formatEuro(g.target)}` })),
       progress(g.saved / g.target, { color: g.color }),
-      el('div', { class: 'meter__note', text: note }));
-  };
-  // Prima gli attivi, poi la sezione "Completati" (cifra raggiunta).
-  const active = C.activeGoals(state);
-  const done = C.completedGoals(state);
-  root.append(...active.map(goalCard));
-  if (done.length) root.append(section({ title: 'Completati', cls: 'goals-done' }, ...done.map(goalCard)));
+      el('div', { class: 'meter__note', text: p.done ? 'Obiettivo raggiunto' : p.monthly ? `Metti da parte ${formatEuro(p.monthly)} al mese per ${p.monthsLeft} ${p.monthsLeft === 1 ? 'mese' : 'mesi'}` : `Mancano ${formatEuro(p.remaining)}` })));
+  }
   root.append(el('div', { class: 'btn-row' }, button('Nuovo obiettivo', () => openGoalForm(ctx), { icon: 'plus', id: 'goal-new' })));
 }
 
@@ -117,8 +108,8 @@ export function openGoalForm(ctx, goal = null) {
   const { store } = ctx;
   const state = store.getState();
   const d = goal
-    ? { name: goal.name, targetText: formatEuroPlain(goal.target), savedText: formatEuroPlain(goal.saved), monthlyText: goal.monthly ? formatEuroPlain(goal.monthly) : '', deadline: goal.deadline || '', color: goal.color }
-    : { name: '', targetText: '', savedText: '', monthlyText: '', deadline: '', color: PALETTE[(state.goals.length + 4) % PALETTE.length] };
+    ? { name: goal.name, targetText: formatEuroPlain(goal.target), savedText: formatEuroPlain(goal.saved), deadline: goal.deadline || '', color: goal.color }
+    : { name: '', targetText: '', savedText: '', deadline: '', color: PALETTE[(state.goals.length + 4) % PALETTE.length] };
   return sheet({
     title: goal ? 'Modifica obiettivo' : 'Nuovo obiettivo',
     onSave: () => {
@@ -126,10 +117,7 @@ export function openGoalForm(ctx, goal = null) {
       if (!target) throw new ValidationError(d.targetText.trim() ? 'Importo non valido' : 'Inserisci l\'importo da raggiungere', 'target');
       const saved = d.savedText.trim() ? parseEuroInput(d.savedText) : 0;
       if (saved === null) throw new ValidationError('Importo non valido', 'saved');
-      // Quota mensile facoltativa (gli obiettivi della v1 non ce l'hanno).
-      const monthly = d.monthlyText.trim() ? parseEuroInput(d.monthlyText) : null;
-      if (monthly === 0 || (d.monthlyText.trim() && monthly === null)) throw new ValidationError('Quota mensile non valida', 'monthly');
-      const inp = { name: d.name, target, saved, monthly, deadline: d.deadline || null, color: d.color };
+      const inp = { name: d.name, target, saved, deadline: d.deadline || null, color: d.color };
       if (goal) store.updateGoal(goal.id, inp); else store.addGoal(inp);
       toast(goal ? 'Obiettivo aggiornato' : 'Obiettivo creato');
       return true;
@@ -139,7 +127,6 @@ export function openGoalForm(ctx, goal = null) {
         el('div', { class: 'form-group' },
           field({ label: 'Nome', field: 'name', id: 'g-name', input: input({ id: 'g-name', value: d.name, maxlength: 60, placeholder: 'Es. Vacanza, Fondo emergenza', onInput: (v) => { d.name = v; } }) }),
           field({ label: 'Da raggiungere (€)', field: 'target', id: 'g-target', input: input({ id: 'g-target', value: d.targetText, inputmode: 'decimal', placeholder: '0,00', onInput: (v) => { d.targetText = v; } }) }),
-          field({ label: 'Quota mensile (€)', field: 'monthly', id: 'g-monthly', hint: 'Facoltativa: quanto vuoi mettere da parte ogni mese. Te la propongo quando salvi lo stipendio.', input: input({ id: 'g-monthly', value: d.monthlyText, inputmode: 'decimal', placeholder: '0,00', onInput: (v) => { d.monthlyText = v; } }) }),
           field({ label: 'Già messo da parte (€)', field: 'saved', id: 'g-saved', input: input({ id: 'g-saved', value: d.savedText, inputmode: 'decimal', placeholder: '0,00', onInput: (v) => { d.savedText = v; } }) }),
           field({ label: 'Scadenza (facoltativa)', field: 'deadline', id: 'g-deadline', input: input({ id: 'g-deadline', type: 'date', value: d.deadline, onInput: (v) => { d.deadline = v; } }) })),
         el('p', { class: 'field__label', text: 'Colore' }),

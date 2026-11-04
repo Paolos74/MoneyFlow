@@ -2,7 +2,7 @@
 // Ogni modifica valida, prepara una copia, salva e solo alla fine notifica.
 
 import { ValidationError, StorageError } from './errors.js';
-import { isValidISO, monthOf } from './dates.js';
+import { isValidISO } from './dates.js';
 import { formatEuro } from './money.js';
 
 export { ValidationError, StorageError };
@@ -106,39 +106,6 @@ function checkRef(list, id, prevId, field, label) {
   return found;
 }
 
-// Busta paga (v2, campi facoltativi sull'entrata): ogni valore in centesimi ≥ 0 oppure null.
-// Il lordo della v1 (`gross`) resta dov'è e vale come "Competenze lorde (Totale competenze)".
-export const PAYSLIP_FIELDS = {
-  contributions: 'Contributi',
-  taxable: 'Imponibile fiscale',
-  irpef: 'IRPEF trattenuta',
-  pension: 'Contributi fondo pensione',
-  deductions: 'Detrazioni',
-};
-
-function cleanPayslip(input) {
-  if (!isObj(input)) return null;
-  const out = {};
-  let any = false;
-  for (const [k, label] of Object.entries(PAYSLIP_FIELDS)) {
-    const v = input[k];
-    if (v === null || v === undefined) { out[k] = null; continue; }
-    out[k] = cleanInt(v, 'ps-' + k, { min: 0, label });
-    any = true;
-  }
-  return any ? out : null;
-}
-
-// Accantonamenti per mese degli obiettivi: { 'YYYY-MM': centesimi con segno }.
-function cleanGoalLog(v) {
-  const out = {};
-  if (!isObj(v)) return out;
-  for (const [k, n] of Object.entries(v)) {
-    if (/^\d{4}-\d{2}$/.test(k) && Number.isSafeInteger(n)) out[k] = n;
-  }
-  return out;
-}
-
 const unitOf = (acc) => (acc ? (acc.kind === 'crypto' ? 'crypto:' + acc.asset : 'eur') : null);
 
 // Totale restituito per una spesa, escludendo eventualmente una restituzione.
@@ -213,7 +180,6 @@ const VALIDATORS = {
       description: cleanText(input.description, 80, 'description', 'Descrizione'),
       note: cleanText(input.note, 500, 'note', 'Nota'),
       excluded: 0, refundOf: null, gross: null,
-      trade: null, price: null, payslip: null,
       scheduledId: typeof input.scheduledId === 'string' ? input.scheduledId : null,
       occurrence: isValidISO(input.occurrence) ? input.occurrence : null,
     };
@@ -236,23 +202,14 @@ const VALIDATORS = {
       if (rec.excluded < refunded) fail(`Sono già stati restituiti ${formatEuro(refunded)}: la quota esclusa non può essere minore`, 'excluded');
     }
     if (type === 'entrata' && input.gross !== null && input.gross !== undefined) {
-      rec.gross = cleanInt(input.gross, 'gross', { min: 1, label: 'Competenze lorde' });
+      rec.gross = cleanInt(input.gross, 'gross', { min: 1, label: 'Lordo' });
     }
-    if (type === 'entrata') rec.payslip = cleanPayslip(input.payslip);
     if (type === 'trasferimento') {
       const to = checkRef(state.accounts, input.toAccountId, prev?.toAccountId, 'toAccountId', 'il conto di arrivo');
       if (input.toAccountId === input.accountId) fail('Scegli due conti diversi', 'toAccountId');
       rec.toAccountId = input.toAccountId;
       if (acc && to && unitOf(acc) !== unitOf(to)) {
         rec.amountTo = cleanInt(input.amountTo, 'amountTo', { min: 1, label: 'Importo ricevuto' });
-      }
-      // Compra/Vendi (v2): un trasferimento euro↔crypto con il prezzo unitario (centesimi per 1 unità intera).
-      if (input.trade === 'compra' || input.trade === 'vendi') {
-        const buy = input.trade === 'compra';
-        const ok = acc && to && (buy ? acc.kind === 'eur' && to.kind === 'crypto' : acc.kind === 'crypto' && to.kind === 'eur');
-        if (!ok) fail(buy ? 'Compra: dal conto in euro al conto crypto' : 'Vendi: dal conto crypto al conto in euro', 'accountId');
-        rec.trade = input.trade;
-        rec.price = cleanInt(input.price, 'price', { min: 1, label: 'Prezzo' });
       }
     }
     if (type === 'restituzione') {
@@ -313,8 +270,6 @@ const VALIDATORS = {
       saved: cleanInt(input.saved ?? 0, 'saved', { min: 0, label: 'Messo da parte' }),
       deadline: input.deadline ? cleanDate(input.deadline, 'deadline', 'Scadenza') : null,
       color: cleanColor(input.color),
-      monthly: input.monthly === null || input.monthly === undefined ? null : cleanInt(input.monthly, 'monthly', { min: 1, label: 'Quota mensile' }),
-      log: cleanGoalLog(input.log),
     };
     uniqueName(state.goals, { ...rec, id: prev?.id });
     return rec;
@@ -459,45 +414,12 @@ export function createStore({ storage, now = () => Date.now(), uuid = () => cryp
     commit(next, [`scheduled_${s.id}`]);
   }
 
-  // Aggiungi/Togli a mano. Con una data valida il movimento entra anche nel mese (log) per la quota mensile.
-  function adjustGoal(id, delta, date = null) {
+  function adjustGoal(id, delta) {
     const g = find('goal', id);
     if (!g || g.deleted) fail('Obiettivo non trovato');
     if (!Number.isSafeInteger(delta) || delta === 0) fail('Importo non valido', 'amount');
     if (g.saved + delta < 0) fail('Non puoi togliere più di quanto hai messo da parte', 'amount');
-    const patch = { saved: g.saved + delta };
-    if (isValidISO(date)) {
-      const log = cleanGoalLog(g.log);
-      const ym = monthOf(date);
-      log[ym] = (log[ym] || 0) + delta;
-      patch.log = log;
-    }
-    return update('goal', id, patch);
-  }
-
-  // "Metti da parte" dopo lo stipendio: più obiettivi in un solo salvataggio, tutto o niente.
-  function allocateGoals(items, date) {
-    if (!isValidISO(date)) fail('Data non valida', 'date');
-    if (!Array.isArray(items) || !items.length) fail('Scegli almeno un obiettivo');
-    const ym = monthOf(date);
-    const next = cloneState(state);
-    const keys = [];
-    const out = [];
-    for (const { id, amount } of items) {
-      const i = next.goals.findIndex((g) => g.id === id);
-      const prev = i >= 0 ? next.goals[i] : null;
-      if (!prev || prev.deleted) fail('Obiettivo non trovato', 'alloc-' + id);
-      if (!Number.isSafeInteger(amount) || amount < 1) fail('Importo: deve essere maggiore di zero', 'alloc-' + id);
-      const log = cleanGoalLog(prev.log);
-      log[ym] = (log[ym] || 0) + amount;
-      const rec = { ...prev, saved: prev.saved + amount, log, updatedAt: stamp(prev) };
-      if (!Number.isSafeInteger(rec.saved)) fail('Importo non valido', 'alloc-' + id);
-      next.goals[i] = rec;
-      keys.push(`goal_${id}`);
-      out.push(rec);
-    }
-    commit(next, keys);
-    return out;
+    return update('goal', id, { saved: g.saved + delta });
   }
 
   const allKeys = () => Object.entries(KINDS).flatMap(([kind, c]) => state[c].map((r) => `${kind}_${r.id}`));
@@ -552,7 +474,7 @@ export function createStore({ storage, now = () => Date.now(), uuid = () => cryp
     confirmAll: (id, dates) => confirmMany(id, dates.map((date) => ({ date }))),
     skipOccurrence: (id, date) => setHandled(id, date, 'saltato'),
     unhandleOccurrence: (id, date) => setHandled(id, date, null),
-    adjustGoal, allocateGoals,
+    adjustGoal,
   };
   for (const kind of ['Account', 'Category', 'Movement', 'Scheduled', 'Goal']) {
     const k = kind.toLowerCase();

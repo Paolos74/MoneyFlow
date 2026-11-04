@@ -187,16 +187,10 @@ export function residualOf(state, expense) {
   return (expense.excluded || 0) - refundedOf(state, expense.id);
 }
 
-// Avanzamento obiettivo. Quota mensile: quella scelta dall'utente (v2, `monthly`); se manca,
-// come in v1 residuo / mesi rimasti (mese corrente incluso), per eccesso.
-// monthSaved = quanto messo da parte nel mese di `today` (dal registro `log`).
+// Avanzamento obiettivo; quota mensile = residuo / mesi rimasti (mese corrente incluso), per eccesso.
 export function goalProgress(goal, today) {
   const remaining = Math.max(0, goal.target - goal.saved);
-  const res = {
-    saved: goal.saved, target: goal.target, remaining, pct: Math.min(1000, percentTenths(goal.saved, goal.target)),
-    done: remaining === 0, monthly: null, monthsLeft: null, expired: false,
-    quota: goal.monthly ?? null, monthSaved: Math.max(0, goal.log?.[monthOf(today)] || 0),
-  };
+  const res = { saved: goal.saved, target: goal.target, remaining, pct: Math.min(1000, percentTenths(goal.saved, goal.target)), done: remaining === 0, monthly: null, monthsLeft: null, expired: false };
   if (goal.deadline && !res.done) {
     const d = parseISO(goal.deadline);
     const t = parseISO(today);
@@ -206,19 +200,7 @@ export function goalProgress(goal, today) {
       res.monthly = Math.ceil(remaining / res.monthsLeft);
     }
   }
-  if (res.quota) res.monthly = res.quota;
   return res;
-}
-
-const byCreated = (a, b) => (a.createdAt || 0) - (b.createdAt || 0);
-
-// Obiettivi attivi (cifra non ancora raggiunta) e completati (saved ≥ target, "Completato ✓").
-export function activeGoals(state) {
-  return live(state.goals).filter((g) => g.saved < g.target).sort(byCreated);
-}
-
-export function completedGoals(state) {
-  return live(state.goals).filter((g) => g.saved >= g.target).sort(byCreated);
 }
 
 // Riepilogo abbonamenti e ricorrenti (solo uscite ripetute, non terminate).
@@ -244,20 +226,8 @@ export function salaryYear(state, year) {
   const rows = state.movements
     .filter((m) => inRange(m, from, to) && isSalary(state, m))
     .sort((a, b) => a.date.localeCompare(b.date) || a.createdAt - b.createdAt)
-    .map((m) => ({ movement: m, net: m.amount, gross: m.gross ?? null, withheld: m.gross != null ? m.gross - m.amount : null, payslip: m.payslip ?? null }));
+    .map((m) => ({ movement: m, net: m.amount, gross: m.gross ?? null, withheld: m.gross != null ? m.gross - m.amount : null }));
   const withGross = rows.filter((r) => r.gross !== null);
-  const sumPs = (k) => rows.reduce((t, r) => t + (r.payslip?.[k] ?? 0), 0);
-  // Mesi con imponibile registrato (mese = data dell'entrata, provvisorio): più buste nello stesso mese si sommano.
-  const byYm = new Map();
-  for (const r of rows) {
-    const ps = r.payslip;
-    if (!ps || ps.taxable === null || ps.taxable === undefined) continue;
-    const ym = monthOf(r.movement.date);
-    const cur = byYm.get(ym) || { ym, taxable: 0, irpef: 0 };
-    cur.taxable += ps.taxable;
-    cur.irpef += ps.irpef ?? 0;
-    byYm.set(ym, cur);
-  }
   return {
     rows,
     net: rows.reduce((t, r) => t + r.net, 0),
@@ -265,22 +235,7 @@ export function salaryYear(state, year) {
     gross: withGross.reduce((t, r) => t + r.gross, 0),
     withheld: withGross.reduce((t, r) => t + r.withheld, 0),
     missing: rows.length - withGross.length,
-    contributions: sumPs('contributions'),
-    taxable: sumPs('taxable'),
-    irpef: sumPs('irpef'),
-    pension: sumPs('pension'),
-    deductions: sumPs('deductions'),
-    months: [...byYm.values()].sort((a, b) => a.ym.localeCompare(b.ym)),
   };
-}
-
-// Compra/Vendi crypto (v2): trasferimento con `trade`.
-export const isTrade = (m) => m.type === 'trasferimento' && (m.trade === 'compra' || m.trade === 'vendi');
-
-export function tradeLabel(state, m) {
-  const cryptoId = m.trade === 'compra' ? m.toAccountId : m.accountId;
-  const asset = byId(state.accounts, cryptoId)?.asset || 'crypto';
-  return (m.trade === 'compra' ? 'Compra ' : 'Vendi ') + asset;
 }
 
 export function salaryYears(state, currentYear) {

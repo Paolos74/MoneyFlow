@@ -2,26 +2,21 @@
 
 App personale per gestire soldi, risparmi, stipendio e spese nel tempo. Funziona nel browser e si installa sul telefono (Android e iPhone). I dati restano sul dispositivo; la sincronizzazione online con Firebase è facoltativa.
 
-Versione: **moneyflow-v2**
+Versione: **moneyflow-v1** (prima pubblicazione)
 
 ## Come si usa
 
-- **Home:** il numero grande della card del mese è il **cash flow** del mese: entrate contate − uscite contate (es. **+1.300,00 €** se sono entrati 2.600 € e ne sono usciti 1.300 €). Verde se è zero o positivo, rosso se è negativo. Sotto restano Entrate, Uscite e Risparmio %.
 - **Schede in basso:** Home, Movimenti, Calendario, Statistiche, Conti. Le Impostazioni si aprono dall'icona ⚙︎ in alto a destra nella Home.
 - **Pulsante +:** registra una spesa, un'entrata o un trasferimento. In cima ci sono le **voci recenti**: toccane una, scrivi l'importo e premi **Salva** (l'importo non viene mai suggerito).
 - **Conti:** in euro (banca, contanti…) o in crypto (solo quantità, es. 0,05 BTC, nessun prezzo da internet). Ogni conto ha un saldo iniziale e un colore. Se elimini un conto, i suoi movimenti restano con l'etichetta "(eliminato)".
 - **Trasferimenti:** spostano soldi tra due conti e non contano né come spesa né come entrata. Tra euro e crypto scrivi anche quanto è arrivato.
-- **Compra e Vendi crypto:** apri il conto crypto (es. Coinbase) e tocca **Compra** o **Vendi**. Scrivi la quantità e il prezzo di 1 unità in euro: l'app calcola l'importo (quantità × prezzo, arrotondato al centesimo). Puoi correggerlo per le commissioni; **Ricalcola** torna al valore calcolato. Il conto in euro scende (Compra) o sale (Vendi) dell'importo, il conto crypto cambia della quantità. Come i trasferimenti, non conta nel cash flow.
 - **Quota esclusa:** su una spesa attiva "Escludi una quota" (es. spesa 40 €, escludi 20 € anticipati per un amico). Il conto scende di 40 €, ma statistiche, budget e tasso di risparmio contano 20 €. I 20 € compaiono in Home → **Da ricevere**; quando l'amico ti restituisce i soldi tocca **Registra restituzione**: entrano nel conto ma non contano come entrata. Se sai che non li riavrai, tocca **Non la ricevo più**: la parte mancante torna a contare come spesa.
 - **Pagamenti programmati:** Home → Pagamenti programmati (oppure + → Programma un pagamento: importo e data già scritti restano). Una volta, ogni settimana, ogni mese, ogni N mesi, ogni anno, con data di fine facoltativa. Alla scadenza **non** si registrano da soli: li trovi in Home → **Da confermare**, dove confermi (anche correggendo importo e data) o salti. Più scadenze arretrate dello stesso pagamento sono raggruppate in una riga, con **Conferma tutte**. Nel calendario i programmati hanno il contorno tratteggiato. Non ci sono notifiche.
 - **Calendario:** tocca un giorno per vedere i suoi movimenti; il + e **Aggiungi in questo giorno** inseriscono un movimento con quella data.
 - **Modifica:** ogni campo di un movimento si può cambiare, anche il tipo (Uscita, Entrata, Trasferimento), tranne per una spesa con restituzioni collegate.
-- **Stipendio e busta paga:** registra lo stipendio come entrata nella categoria Stipendio (la prima delle categorie di entrata), con il **Netto a pagare** come importo. Sotto c'è il modulo **Busta paga (facoltativa)**: Competenze lorde (Totale competenze), Contributi a carico (900), Imponibile fiscale del mese (I01), IRPEF netta trattenuta (I21), Contributi fondo pensione (60450), Detrazioni del mese. Il "Lordo" scritto con la versione precedente compare come Competenze lorde. Il mese della busta è quello della data dell'entrata.
-- **Leggi busta paga (PDF), sperimentale:** nel modulo tocca **Leggi busta paga (PDF)** e scegli il PDF dal telefono. Il file viene letto **solo sul telefono** (non viene salvato né inviato) e riempie i campi che trova: controllali e premi **Salva**. Se il PDF è una scansione, è protetto o ha un formato diverso, compare un messaggio e i campi si compilano a mano. È stato provato con un PDF di prova, non con una busta paga vera: provalo e controlla i numeri.
-- **Stipendio e tasse** (Statistiche → Stipendio e tasse): totali dell'anno (competenze, contributi, imponibile, IRPEF trattenuta, netto) e la **stima delle tasse**: IRPEF dovuta sull'anno con gli scaglioni 2026 e le detrazioni per lavoro dipendente rapportate ai giorni lavorati, confronto con l'IRPEF trattenuta (**Rimborso stimato** o **Da pagare stimati**) e le addizionali regionale e comunale dell'anno dopo (11 rate). I mesi che mancano valgono come la media dei mesi registrati, oppure come i valori che scrivi tu. In **Impostazioni della stima** scrivi la data di inizio rapporto, le percentuali delle addizionali (le trovi nella CU o sui siti di Regione e Comune) e, se un bonus falsa la media, l'imponibile e l'IRPEF per ogni mese mancante. **È una stima**: non sostituisce la Certificazione Unica (CU) né il 730.
-- **Se aumento il fondo pensione** (Impostazioni → Strumenti, oppure da Stipendio e tasse): scrivi la retribuzione base, la percentuale volontaria attuale e quella nuova; vedi quanto versi in più, quanta IRPEF risparmi, di quanto scende il netto e quanto spazio deducibile resta rispetto al limite di 5.164,57 € l'anno. I valori non vengono salvati.
+- **Stipendio:** registralo come entrata nella categoria Stipendio (la prima delle categorie di entrata), con il **netto** come importo. Se vuoi, scrivi anche il **Lordo**, subito sotto l'importo: in Statistiche → **Stipendio e tasse** vedi trattenute (lordo − netto) e totali dell'anno.
 - **Budget:** Impostazioni → Budget, un importo al mese per categoria. Se lo superi la barra in Home diventa rossa. Tocca un budget in Home, o una categoria nella ciambella di Statistiche, per vedere le spese di quella categoria.
-- **Obiettivi:** Conti → Obiettivi. Nome, cifra da raggiungere, **quota mensile** e scadenza (facoltative). Vedi quanto hai messo da parte questo mese rispetto alla quota (es. "30,00 € di 50,00 € questo mese"). Quando salvi un nuovo stipendio si apre **Metti da parte** con le quote già spuntate: cambia le cifre o togli le spunte e tocca **Conferma**, oppure **Salta**. I soldi restano sul conto: l'obiettivo tiene solo il conto. Raggiunta la cifra l'obiettivo diventa **Completato ✓** e passa nella sezione **Completati**; per riaprirlo alza la cifra con **Modifica** o usa **Togli**.
+- **Obiettivi:** Conti → Obiettivi. Importo, scadenza e quanto mettere da parte al mese.
 
 ## Backup
 
@@ -34,8 +29,6 @@ Per ripristinare: Impostazioni → Backup → **Importa backup** e scegli il fil
 Impostazioni → **Esporta CSV**: scegli il periodo e il formato.
 - **Excel italiano** (separatore `;`) per Excel in italiano.
 - **Numbers, Fogli, iPhone** (separatore `,`) per Numbers, Google Fogli, l'anteprima dell'iPhone ed Excel non italiano.
-
-Le uscite hanno il segno meno e l'**importo contato**: per una spesa di 40 € con 20 € esclusi il CSV riporta -20,00. Compra e Vendi compaiono come trasferimenti con l'importo uscito dal conto.
 
 Se aprendo il file vedi tutto nella colonna A, riesporta con l'altro formato. L'app ricorda l'ultima scelta.
 
