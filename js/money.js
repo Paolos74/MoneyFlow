@@ -125,3 +125,31 @@ export function formatPercent(tenths) {
   const abs = Math.abs(n);
   return (n < 0 ? '-' : '') + Math.floor(abs / 10) + ',' + (abs % 10) + '%';
 }
+
+// Compra/Vendi crypto: quantità (unità 1e-8) × prezzo per 1 unità intera (centesimi) / 1e8 = centesimi.
+// Calcolo con BigInt per non perdere precisione; arrotondamento al centesimo "metà in su".
+// Restituisce null se gli input non sono interi positivi o se il risultato è troppo grande.
+export function tradeEuroCents(qtyUnits, priceCents) {
+  if (!Number.isSafeInteger(qtyUnits) || !Number.isSafeInteger(priceCents) || qtyUnits <= 0 || priceCents <= 0) return null;
+  const unit = BigInt(QTY_UNIT);
+  const cents = (BigInt(qtyUnits) * BigInt(priceCents) + unit / 2n) / unit;
+  const n = Number(cents);
+  return Number.isSafeInteger(n) ? n : null;
+}
+
+// Percentuale scritta dall'utente → punti base interi (1,73 % = 173). Da 0 a 10 %.
+export function parsePercentInput(text) {
+  if (typeof text !== 'string') return null;
+  const s = text.replace(/[\s\u00A0\u202F]/g, '').replace(/%$/, '');
+  const m = /^(\d{1,2})(?:[.,](\d{1,2}))?$/.exec(s);
+  if (!m) return null;
+  const bp = Number(m[1]) * 100 + Number(((m[2] || '') + '00').slice(0, 2));
+  return bp <= 1000 ? bp : null;
+}
+
+// 173 → "1,73%"
+export function formatPercentBp(bp) {
+  const n = Math.round(Number(bp) || 0);
+  const abs = Math.abs(n);
+  return (n < 0 ? '-' : '') + Math.floor(abs / 100) + ',' + String(abs % 100).padStart(2, '0') + '%';
+}

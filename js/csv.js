@@ -38,7 +38,8 @@ function accountName(state, id) {
 function amountText(state, m) {
   const a = state.accounts.find((x) => x.id === m.accountId);
   const crypto = a && a.kind === 'crypto';
-  const v = m.type === 'uscita' ? -m.amount : m.amount;
+  // Uscite con l'importo contato (importo − quota esclusa), decisione v2 n. 6.
+  const v = m.type === 'uscita' ? -(m.amount - (m.excluded || 0)) : m.amount;
   return crypto ? formatQtyPlain(v) : formatEuroPlain(v);
 }
 

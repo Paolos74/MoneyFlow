@@ -1,9 +1,9 @@
 // Dettaglio di un conto: saldo, movimenti per giorno, modifica, trasferimento,
-// variazione quantità (crypto), elimina conto lasciando i movimenti (D6).
+// Compra/Vendi e variazione quantità (crypto), elimina conto lasciando i movimenti (D6).
 
 import { el, card, button, emptyState, confirmDialog, toast, attempt, list } from '../ui.js';
 import * as C from '../calc.js';
-import { openMovementForm } from './movimento-form.js';
+import { openMovementForm, openTradeForm } from './movimento-form.js';
 import { openAccountForm } from './conti.js';
 import { dayGroups, amountIn } from './parts.js';
 
@@ -27,6 +27,11 @@ export function render(root, ctx) {
     actions.push(button('Uscita', () => openMovementForm(ctx, { preset: { type: 'uscita', accountId: a.id }, showRecents: true }), { icon: 'up', small: true, id: 'acc-out' }));
     actions.push(button('Entrata', () => openMovementForm(ctx, { preset: { type: 'entrata', accountId: a.id } }), { icon: 'down', small: true, id: 'acc-in' }));
   } else {
+    // Compra/Vendi: servono almeno un conto in euro.
+    if (C.sortedAccounts(state).some((x) => x.kind === 'eur')) {
+      actions.push(button('Compra', () => openTradeForm(ctx, { side: 'compra', cryptoAccountId: a.id }), { kind: 'primary', icon: 'down', small: true, id: 'acc-buy' }));
+      actions.push(button('Vendi', () => openTradeForm(ctx, { side: 'vendi', cryptoAccountId: a.id }), { icon: 'up', small: true, id: 'acc-sell' }));
+    }
     actions.push(button('Variazione quantità', () => openMovementForm(ctx, { preset: { type: 'variazione', accountId: a.id } }), { icon: 'coin', small: true, id: 'acc-var' }));
   }
   if (C.sortedAccounts(state).length > 1) actions.push(button('Trasferisci', () => openMovementForm(ctx, { preset: { type: 'trasferimento', accountId: a.id } }), { icon: 'transfer', small: true, id: 'acc-transfer' }));

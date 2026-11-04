@@ -83,5 +83,5 @@ export function render(root, ctx) {
       ...rs.items.map((i) => row({ icon: 'repeat', color: C.scheduledColor(state, i.sched), planned: true, title: scheduledTitle(state, i.sched), subtitle: freqLabel(i.sched), value: formatEuro(i.monthly), valueSub: 'al mese', href: `#programmati/${i.sched.id}` })))
       : emptyState({ icon: 'repeat', title: 'Nessun abbonamento', text: 'Le uscite programmate ripetute compaiono qui con il costo al mese e all\'anno.' })));
 
-  root.append(section({}, list(row({ icon: 'doc', color: '#4F46E5', title: 'Stipendio e tasse', subtitle: 'Lordo, netto, trattenute e totali annui', href: '#statistiche/stipendio', id: 'link-salary' }))));
+  root.append(section({}, list(row({ icon: 'doc', color: '#4F46E5', title: 'Stipendio e tasse', subtitle: 'Busta paga, stima IRPEF e addizionali', href: '#statistiche/stipendio', id: 'link-salary' }))));
 }

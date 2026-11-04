@@ -3,6 +3,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createStore, PALETTE } from '../js/store.js';
 import * as C from '../js/calc.js';
+import { readFileSync } from 'node:fs';
 import { memoryStorage, clock, seqUuid } from './helpers.js';
 
 function world() {
@@ -183,4 +184,62 @@ test('promemoria backup dopo 30 giorni', () => {
   assert.equal(C.backupDue({ lastBackupAt: 0, firstUseAt: 0 }, 100 * day), false);
   assert.equal(C.backupDue({ lastBackupAt: 0, firstUseAt: day }, 32 * day), true);
   assert.equal(C.backupDue({ lastBackupAt: 10 * day, firstUseAt: day }, 32 * day), false);
+});
+
+test('v2 obiettivi: quota mensile scelta, messo da parte nel mese, attivi e completati', () => {
+  const g = { target: 100000, saved: 40000, monthly: 5000, log: { '2025-03': 3000 } };
+  const p = C.goalProgress(g, '2025-03-15');
+  assert.equal(p.monthly, 5000);
+  assert.equal(p.quota, 5000);
+  assert.equal(p.monthSaved, 3000); // "30 di 50 €"
+  assert.equal(C.goalProgress(g, '2025-04-01').monthSaved, 0);
+  // senza quota resta il calcolo v1 (60.000 / 4 mesi)
+  const v1 = C.goalProgress({ target: 100000, saved: 40000, deadline: '2025-06-30' }, '2025-03-15');
+  assert.equal(v1.monthly, 15000);
+  assert.equal(v1.quota, null);
+  assert.equal(v1.monthSaved, 0);
+
+  const state = { goals: [
+    { id: 'a', name: 'A', target: 100, saved: 100, createdAt: 2, deleted: false },
+    { id: 'b', name: 'B', target: 100, saved: 99, createdAt: 1, deleted: false },
+    { id: 'c', name: 'C', target: 100, saved: 0, createdAt: 3, deleted: true },
+  ] };
+  assert.deepEqual(C.activeGoals(state).map((x) => x.id), ['b']);
+  assert.deepEqual(C.completedGoals(state).map((x) => x.id), ['a']);
+});
+
+test('v2 stipendio: totali della busta paga e mesi con imponibile', () => {
+  const { store, cat, eur } = world();
+  const st = cat('entrata', 'Stipendio');
+  store.addMovement({ type: 'entrata', date: '2025-03-10', amount: 80000, accountId: eur.id, categoryId: st, payslip: { taxable: 100000, irpef: 20000, contributions: 9000 } });
+  store.addMovement({ type: 'entrata', date: '2025-03-27', amount: 40000, accountId: eur.id, categoryId: st, payslip: { taxable: 50000, irpef: 10000 } });
+  store.addMovement({ type: 'entrata', date: '2025-04-27', amount: 280000, gross: 400000, accountId: eur.id, categoryId: st, payslip: { taxable: 370000, irpef: 86000, pension: 9750 } });
+  store.addMovement({ type: 'entrata', date: '2025-05-27', amount: 280000, accountId: eur.id, categoryId: st });
+  const y = C.salaryYear(store.getState(), 2025);
+  assert.deepEqual(y.months, [{ ym: '2025-03', taxable: 150000, irpef: 30000 }, { ym: '2025-04', taxable: 370000, irpef: 86000 }]);
+  assert.equal(y.taxable, 520000);
+  assert.equal(y.irpef, 116000);
+  assert.equal(y.contributions, 9000);
+  assert.equal(y.pension, 9750);
+  assert.equal(y.deductions, 0);
+  assert.equal(y.rows[0].payslip.taxable, 100000);
+  assert.equal(y.rows[3].payslip, null);
+});
+
+test('v2: lordo della fixture v1 letto come competenze lorde', () => {
+  const raw = readFileSync(new URL('./fixtures/data-v1.json', import.meta.url), 'utf8');
+  const store = createStore({ storage: memoryStorage({ 'moneyflow:data': raw }), now: clock(), uuid: seqUuid() });
+  const y = C.salaryYear(store.getState(), 2025);
+  assert.equal(y.gross, 230000);
+  assert.equal(y.rows[0].payslip, null);
+  assert.deepEqual(y.months, []);
+});
+
+test('v2 Compra/Vendi: etichetta', () => {
+  const state = { accounts: [{ id: 'e', kind: 'eur' }, { id: 'b', kind: 'crypto', asset: 'BTC' }] };
+  const m = { type: 'trasferimento', trade: 'compra', accountId: 'e', toAccountId: 'b' };
+  assert.equal(C.isTrade(m), true);
+  assert.equal(C.tradeLabel(state, m), 'Compra BTC');
+  assert.equal(C.tradeLabel(state, { ...m, trade: 'vendi', accountId: 'b', toAccountId: 'e' }), 'Vendi BTC');
+  assert.equal(C.isTrade({ type: 'trasferimento', trade: null }), false);
 });

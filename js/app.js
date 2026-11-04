@@ -4,6 +4,7 @@
 import { createStore, DATA_KEY } from './store.js';
 import { createPrefs, PREFS_KEY } from './prefs.js';
 import { createSync, SYNC_KEY } from './sync.js';
+import { createTaxSettings, TAX_KEY } from './tax-settings.js';
 import { el, icon, clear, preserveFocus } from './ui.js';
 import { todayISO } from './dates.js';
 import { openQuickAdd } from './views/movimento-form.js';
@@ -29,6 +30,7 @@ const storage = {
 };
 
 const prefs = createPrefs(storage);
+const taxSettings = createTaxSettings(storage);
 const store = createStore({ storage, uuid: () => crypto.randomUUID() });
 const sync = createSync({ store, storage, fetch: (...a) => globalThis.fetch(...a) });
 
@@ -140,7 +142,7 @@ function renderNow() {
   }
   clear(viewEl);
   const ctx = {
-    store, prefs, sync, install, go, rerender, setQuery, applyTheme, path, query, params,
+    store, prefs, sync, install, go, rerender, setQuery, applyTheme, path, query, params, tax: taxSettings,
     today: () => todayISO(),
     header: (opts) => setHeader(viewEl, opts),
     getVersion,
@@ -175,6 +177,7 @@ addEventListener('storage', (e) => {
   if (e.key === DATA_KEY) store.reload();
   else if (e.key === PREFS_KEY) { prefs.reload(); applyTheme(); rerender(); }
   else if (e.key === SYNC_KEY) sync.reloadState();
+  else if (e.key === TAX_KEY) { taxSettings.reload(); rerender(); }
 });
 
 // ---- Offline ----
@@ -233,7 +236,7 @@ document.addEventListener('visibilitychange', () => {
 for (const span of document.querySelectorAll('.tab__icon')) span.append(icon(span.dataset.icon, 24));
 $('fab').append(icon('plus', 30));
 // Nel Calendario il + apre il foglio sul giorno scelto; nelle altre schede su oggi.
-$('fab').addEventListener('click', () => openQuickAdd({ store, prefs, go, today: () => todayISO() },
+$('fab').addEventListener('click', () => openQuickAdd({ store, prefs, go, tax: taxSettings, today: () => todayISO() },
   { date: currentRoute()[0] === 'calendario' ? calendario.selectedDay() : undefined }));
 applyTheme();
 updateOnline();

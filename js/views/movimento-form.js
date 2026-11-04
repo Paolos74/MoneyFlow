@@ -1,9 +1,12 @@
-// Fogli per inserire e modificare movimenti (uscita, entrata, trasferimento, restituzione,
-// variazione quantità), programmati, conferma "Da confermare". Bozza nello stato del modulo.
+// Fogli per inserire e modificare movimenti (uscita, entrata con busta paga, trasferimento, Compra/Vendi crypto,
+// restituzione, variazione quantità), programmati, conferma "Da confermare". Bozza nello stato del modulo.
 
 import { el, sheet, field, input, textarea, select, chips, segmented, toggle, stepper, toast, icon, clear, preserveFocus, button, confirmDialog, attempt } from '../ui.js';
-import { parseEuroInput, parseQtyInput, formatEuro, formatEuroPlain, formatQtyPlain, formatQty } from '../money.js';
+import { parseEuroInput, parseQtyInput, formatEuro, formatEuroPlain, formatQtyPlain, formatQty, tradeEuroCents } from '../money.js';
 import { ValidationError } from '../errors.js';
+import { extractPdfLines, PdfReadError } from '../pdf-text.js';
+import { parsePayslipLines } from '../payslip.js';
+import { openSetAsideSheet } from './metti-da-parte.js';
 import { formatDateIt, monthOf } from '../dates.js';
 import { FREQ_LABELS } from '../recurrence.js';
 import * as C from '../calc.js';
@@ -42,6 +45,26 @@ function accountOptions(state, type, currentId) {
 function defaultAccount(state, type) {
   return accountOptions(state, type)[0]?.value || '';
 }
+
+// Campi facoltativi della busta paga, con il codice della voce accanto all'etichetta (il netto è l'importo).
+const PS_FIELDS = [
+  ['contributions', 'Contributi a carico (900 Totale ritenute sociali)'],
+  ['taxable', 'Imponibile fiscale del mese (I01)'],
+  ['irpef', 'IRPEF netta trattenuta (I21)'],
+  ['pension', 'Contributi deducibili fondo pensione (60450)'],
+  ['deductions', 'Detrazioni del mese'],
+];
+const PDF_LABELS = {
+  net: 'Netto a pagare', gross: 'Competenze lorde', contributions: 'Contributi (900)',
+  taxable: 'Imponibile fiscale (I01)', irpef: 'IRPEF netta (I21)', pension: 'Fondo pensione (60450)',
+};
+const emptyPs = () => ({ contributions: '', taxable: '', irpef: '', pension: '', deductions: '' });
+const psFrom = (ps) => {
+  const out = emptyPs();
+  if (ps) for (const k of Object.keys(out)) out[k] = ps[k] === null || ps[k] === undefined ? '' : formatEuroPlain(ps[k]);
+  return out;
+};
+const isSalaryCat = (state, id) => state.categories.find((c) => c.id === id)?.role === 'stipendio';
 
 // Con salaryFirst la categoria con ruolo Stipendio è la prima chip delle entrate.
 function categoryChips(state, type, value, onChange, { salaryFirst = false } = {}) {
@@ -101,6 +124,8 @@ export async function writeOffCredit(ctx, expense) {
  * opts: { movement } per modificare; { preset } per un nuovo; { confirm: { sched, date } } per confermare.
  */
 export function openMovementForm(ctx, opts = {}) {
+  // Compra/Vendi crypto hanno il loro foglio (quantità × prezzo).
+  if (opts.movement && C.isTrade(opts.movement)) return openTradeForm(ctx, { movement: opts.movement });
   const { store } = ctx;
   const editing = opts.movement || null;
   const confirming = opts.confirm || null;
@@ -117,7 +142,7 @@ export function openMovementForm(ctx, opts = {}) {
         amountText: plainFor(a, Math.abs(m.amount)), sign: m.amount < 0 ? -1 : 1,
         amountToText: m.amountTo ? plainFor(to, m.amountTo) : '', description: m.description || '', note: m.note || '',
         excludeOn: !!m.excluded, excludedText: m.excluded ? formatEuroPlain(m.excluded) : '',
-        grossText: m.gross ? formatEuroPlain(m.gross) : '', refundOf: m.refundOf || null,
+        grossText: m.gross ? formatEuroPlain(m.gross) : '', ps: psFrom(m.payslip), pdf: null, refundOf: m.refundOf || null,
       };
     }
     if (confirming) {
@@ -128,7 +153,7 @@ export function openMovementForm(ctx, opts = {}) {
         type: s.type, date: confirming.date, accountId: s.accountId, toAccountId: s.toAccountId || '', categoryId: s.categoryId || '',
         // L'importo è quello scritto dall'utente nel programmato (non un suggerimento dell'app).
         amountText: plainFor(a, s.amount), sign: 1, amountToText: s.amountTo ? plainFor(to, s.amountTo) : '',
-        description: s.description || '', note: '', excludeOn: false, excludedText: '', grossText: '', refundOf: null,
+        description: s.description || '', note: '', excludeOn: false, excludedText: '', grossText: '', ps: emptyPs(), pdf: null, refundOf: null,
       };
     }
     const p = opts.preset || {};
@@ -136,7 +161,7 @@ export function openMovementForm(ctx, opts = {}) {
     return {
       type, date: p.date || today, accountId: p.accountId || defaultAccount(state0, type), toAccountId: p.toAccountId || '',
       categoryId: p.categoryId || '', amountText: '', sign: p.sign || 1, amountToText: '', description: p.description || '', note: '',
-      excludeOn: false, excludedText: '', grossText: '', refundOf: p.refundOf || null,
+      excludeOn: false, excludedText: '', grossText: '', ps: emptyPs(), pdf: null, refundOf: p.refundOf || null,
     };
   })();
 
@@ -209,7 +234,8 @@ export function openMovementForm(ctx, opts = {}) {
       out.push(segmented([{ value: 1, label: 'Aumenta', id: 'sign-plus' }, { value: -1, label: 'Diminuisci', id: 'sign-minus' }], d.sign, (v) => { d.sign = v; draw(); }, { label: 'Segno' }));
     }
 
-    const amountLabel = d.type === 'trasferimento' ? 'Importo inviato' : isCrypto(a) ? 'Quantità' : 'Importo';
+    const salary = d.type === 'entrata' && isSalaryCat(state, d.categoryId);
+    const amountLabel = d.type === 'trasferimento' ? 'Importo inviato' : isCrypto(a) ? 'Quantità' : salary ? 'Netto a pagare' : 'Importo';
     const amountHint = d.type === 'restituzione' ? (() => {
       const exp = state.movements.find((m) => m.id === d.refundOf);
       return exp ? `Da ricevere: ${formatEuro(Math.max(0, C.residualOf(state, exp) + (editing ? editing.amount : 0)))}` : null;
@@ -218,17 +244,10 @@ export function openMovementForm(ctx, opts = {}) {
       field({ label: amountLabel + (isCrypto(a) ? ` (${a.asset})` : ' (€)'), field: 'amount', id: 'f-amount', hint: amountHint,
         input: amountInput('f-amount', d.amountText, (v) => { d.amountText = v; }, isCrypto(a) ? '0,00000000' : '0,00') })));
 
-    // Lordo subito sotto l'importo quando la categoria è Stipendio (o c'è già un lordo).
-    if (d.type === 'entrata') {
-      const cat = state.categories.find((c) => c.id === d.categoryId);
-      if (cat?.role === 'stipendio' || d.grossText) {
-        const net = parseEuroInput(d.amountText);
-        const gross = parseEuroInput(d.grossText);
-        out.push(el('div', { class: 'form-group' },
-          field({ label: 'Lordo (facoltativo, €)', field: 'gross', id: 'f-gross',
-            hint: net && gross ? `Trattenute: ${formatEuro(gross - net)}. L'importo sopra è il netto arrivato sul conto.` : 'Per l\'area Stipendio e tasse. L\'importo sopra è il netto.',
-            input: input({ id: 'f-gross', value: d.grossText, inputmode: 'decimal', placeholder: '0,00', onInput: (v) => { d.grossText = v; } }) })));
-      }
+    // Busta paga subito sotto l'importo quando la categoria è Stipendio (o ci sono già dei dati).
+    // Il "Lordo" della v1 (`gross`) è il campo Competenze lorde.
+    if (d.type === 'entrata' && (salary || d.grossText || Object.values(d.ps).some((v) => v.trim()))) {
+      out.push(...payslipBlock());
     }
 
     // Conti
@@ -305,6 +324,64 @@ export function openMovementForm(ctx, opts = {}) {
     return out;
   }
 
+  function payslipBlock() {
+    const net = parseEuroInput(d.amountText);
+    const gross = parseEuroInput(d.grossText);
+    // Esito della lettura in un riquadro: verde con ✓ se letto, rosso con ! se non letto.
+    const pdfBox = [];
+    if (d.pdf?.busy) pdfBox.push(el('div', { class: 'callout' }, icon('doc'), el('div', {}, el('p', { text: 'Lettura del PDF in corso…' }))));
+    else if (d.pdf?.error) pdfBox.push(el('div', { class: 'callout callout--error' }, icon('alert'), el('div', {}, el('p', { class: 'callout__title', text: d.pdf.error }))));
+    else if (d.pdf?.ok) {
+      pdfBox.push(el('div', { class: 'callout callout--ok' }, icon('check'), el('div', {},
+        el('p', { class: 'callout__title', text: d.pdf.ok }),
+        d.pdf.missing.length ? el('p', { text: `Non trovati: ${d.pdf.missing.join(', ')}. Compilali a mano se servono.` }) : null,
+        d.pdf.monthNote ? el('p', { text: d.pdf.monthNote }) : null)));
+    }
+    const fileInput = el('input', { type: 'file', id: 'f-pdf', accept: 'application/pdf,.pdf', hidden: true, attrs: { 'aria-label': 'Scegli il PDF della busta paga' },
+      on: { change: (e) => { const f = e.target.files && e.target.files[0]; if (f) readPdf(f); } } });
+    return [
+      el('p', { class: 'field__label', text: 'Busta paga (facoltativa)' }),
+      el('div', { class: 'form-group' },
+        el('div', { class: 'field', id: 'f-pdf-box', attrs: { 'aria-live': 'polite' } },
+          button('Leggi busta paga (PDF)', () => document.getElementById('f-pdf')?.click(), { icon: 'doc', small: true, id: 'f-read-pdf', disabled: !!d.pdf?.busy }),
+          fileInput,
+          el('p', { class: 'field__hint', text: 'Sperimentale: il PDF viene letto solo sul telefono, non viene salvato né inviato.' }),
+          ...pdfBox),
+        field({ label: 'Competenze lorde (Totale competenze, €)', field: 'gross', id: 'f-gross',
+          hint: net && gross ? `Trattenute: ${formatEuro(gross - net)} (competenze − netto). Il netto è l'importo arrivato sul conto.` : 'Per l\'area Stipendio e tasse. L\'importo sopra è il netto arrivato sul conto.',
+          input: input({ id: 'f-gross', value: d.grossText, inputmode: 'decimal', placeholder: '0,00', onInput: (v) => { d.grossText = v; } }) }),
+        ...PS_FIELDS.map(([k, label]) => field({ label: label + ' (€)', field: 'ps-' + k, id: 'f-ps-' + k,
+          input: input({ id: 'f-ps-' + k, value: d.ps[k], inputmode: 'decimal', placeholder: '0,00', onInput: (v) => { d.ps[k] = v; } }) }))),
+      el('p', { class: 'section-footer', text: 'Il mese della busta è quello della data dell\'entrata (scelta provvisoria). I dati servono alla stima delle tasse in Statistiche → Stipendio e tasse.' }),
+    ];
+  }
+
+  // Legge il PDF sul dispositivo e riempie solo i campi trovati; l'utente controlla e salva.
+  async function readPdf(file) {
+    d.pdf = { busy: true };
+    draw();
+    try {
+      const bytes = new Uint8Array(await file.arrayBuffer());
+      const r = parsePayslipLines(await extractPdfLines(bytes));
+      if (!r.found.length) {
+        d.pdf = { error: 'Nel PDF non ho trovato le voci della busta paga: compila i campi a mano.' };
+      } else {
+        if (r.net !== null) d.amountText = formatEuroPlain(r.net);
+        if (r.gross !== null) d.grossText = formatEuroPlain(r.gross);
+        for (const k of ['contributions', 'taxable', 'irpef', 'pension']) if (r[k] !== null) d.ps[k] = formatEuroPlain(r[k]);
+        let monthNote = null;
+        if (r.month && r.year) {
+          const ym = `${r.year}-${String(r.month).padStart(2, '0')}`;
+          if (ym !== monthOf(d.date || today)) monthNote = `La busta è di ${String(r.month).padStart(2, '0')}/${r.year}: la data dell'entrata decide il mese (provvisorio).`;
+        }
+        d.pdf = { ok: `Letti ${r.found.length} campi: controlla i valori e premi Salva.`, missing: r.missing.map((k) => PDF_LABELS[k]), monthNote };
+      }
+    } catch (e) {
+      d.pdf = { error: e instanceof PdfReadError ? e.message : 'Non riesco a leggere questo PDF: compila i campi a mano.' };
+    }
+    draw();
+  }
+
   function focusAmount() {
     setTimeout(() => document.getElementById('f-amount')?.focus(), 0);
   }
@@ -331,9 +408,20 @@ export function openMovementForm(ctx, opts = {}) {
     if (d.type === 'entrata') {
       if (d.grossText.trim()) {
         const g = parseEuroInput(d.grossText);
-        if (g === null) throw new ValidationError('Lordo non valido (es. 2.000,00)', 'gross');
+        if (g === null || g === 0) throw new ValidationError('Competenze lorde non valide (es. 3.250,00)', 'gross');
         input.gross = g;
       } else input.gross = null;
+      const ps = {};
+      let any = false;
+      for (const [k] of PS_FIELDS) {
+        const t = d.ps[k].trim();
+        if (!t) { ps[k] = null; continue; }
+        const v = parseEuroInput(t);
+        if (v === null) throw new ValidationError('Importo non valido (es. 1.234,56)', 'ps-' + k);
+        ps[k] = v;
+        any = true;
+      }
+      input.payslip = any ? ps : null;
     }
     if (d.type === 'trasferimento') {
       if (!d.toAccountId) throw new ValidationError('Scegli il conto di arrivo', 'toAccountId');
@@ -359,11 +447,147 @@ export function openMovementForm(ctx, opts = {}) {
       else mov = store.addMovement(inp);
       toast(editing ? 'Modifiche salvate' : confirming ? 'Pagamento confermato' : 'Movimento salvato');
       budgetWarning(store, mov);
+      // Nuovo stipendio (anche da un programmato): foglio "Metti da parte" se ci sono obiettivi attivi.
+      if (!editing && mov.type === 'entrata' && isSalaryCat(store.getState(), mov.categoryId) && C.activeGoals(store.getState()).length) {
+        setTimeout(() => openSetAsideSheet(ctx, { date: mov.date }), 0);
+      }
       return mov;
     },
     content: (s) => { body = s.body; body.append(...build()); },
   });
   if (!editing) focusAmount();
+  return api;
+}
+
+// Compra/Vendi crypto: quantità × prezzo unitario = importo in euro, calcolato ma modificabile (commissioni).
+// Si salva come trasferimento euro↔crypto con `trade` e `price`.
+export function openTradeForm(ctx, { side = 'compra', cryptoAccountId = null, movement = null } = {}) {
+  const { store } = ctx;
+  const state0 = store.getState();
+  const editing = movement;
+  const d = (() => {
+    if (editing) {
+      const buy = editing.trade === 'compra';
+      const qty = buy ? editing.amountTo : editing.amount;
+      const euro = buy ? editing.amount : editing.amountTo;
+      return {
+        side: editing.trade, cryptoId: buy ? editing.toAccountId : editing.accountId, eurId: buy ? editing.accountId : editing.toAccountId,
+        qtyText: formatQtyPlain(qty), priceText: formatEuroPlain(editing.price), amountText: formatEuroPlain(euro),
+        amountEdited: euro !== tradeEuroCents(qty, editing.price), date: editing.date, description: editing.description || '', note: editing.note || '',
+      };
+    }
+    const eur = C.sortedAccounts(state0).find((a) => a.kind === 'eur');
+    return { side, cryptoId: cryptoAccountId, eurId: eur?.id || '', qtyText: '', priceText: '', amountText: '', amountEdited: false, date: ctx.today(), description: '', note: '' };
+  })();
+  let body;
+  const draw = () => preserveFocus(() => { clear(body); body.append(...build()); });
+  const cryptoAcc = () => acc(store.getState(), d.cryptoId);
+  const calc = () => {
+    const q = parseQtyInput(d.qtyText);
+    const p = parseEuroInput(d.priceText);
+    return q && p ? { q, p, cents: tradeEuroCents(q, p) } : null;
+  };
+  const calcText = () => {
+    const c = calc();
+    const asset = cryptoAcc()?.asset || '';
+    if (!c) return 'Scrivi quantità e prezzo: l\'importo si calcola da solo. Puoi correggerlo per le commissioni.';
+    if (c.cents === null) return 'Quantità o prezzo troppo grandi';
+    return `Calcolato: ${formatQty(c.q, asset)} × ${formatEuro(c.p)} = ${formatEuro(c.cents)}. Puoi correggerlo per le commissioni.`;
+  };
+  // Ricalcolo dal vivo senza ridisegnare (finché l'importo non è stato corretto a mano).
+  const refresh = () => {
+    const c = calc();
+    if (!d.amountEdited) {
+      d.amountText = c && c.cents !== null ? formatEuroPlain(c.cents) : '';
+      const n = document.getElementById('t-amount');
+      if (n) n.value = d.amountText;
+    }
+    const h = document.getElementById('t-calc');
+    if (h) h.textContent = calcText();
+  };
+
+  function build() {
+    const state = store.getState();
+    const ca = cryptoAcc();
+    const asset = ca?.asset || '';
+    const buy = d.side === 'compra';
+    const out = [];
+    if (!editing) {
+      out.push(segmented([{ value: 'compra', label: 'Compra', id: 'trade-compra' }, { value: 'vendi', label: 'Vendi', id: 'trade-vendi' }], d.side,
+        (v) => { d.side = v; const t = body.closest('.sheet')?.querySelector('.sheet__title'); if (t) t.textContent = v === 'compra' ? `Compra ${asset}` : `Vendi ${asset}`; draw(); }, { label: 'Compra o vendi' }));
+    }
+    out.push(el('p', { class: 'section-footer', text: `Conto crypto: ${ca ? `${ca.name} (${asset})` : C.accountLabel(state, d.cryptoId)}` }));
+    out.push(el('div', { class: 'form-group' },
+      field({ label: `Quantità (${asset})`, field: 'qty', id: 't-qty', hint: 'Fino a 8 decimali',
+        input: amountInput('t-qty', d.qtyText, (v) => { d.qtyText = v; refresh(); }, '0,00000000') }),
+      field({ label: `Prezzo di 1 ${asset} (€)`, field: 'price', id: 't-price',
+        input: input({ id: 't-price', value: d.priceText, inputmode: 'decimal', placeholder: '0,00', onInput: (v) => { d.priceText = v; refresh(); } }) }),
+      field({ label: buy ? 'Importo pagato (€)' : 'Importo ricevuto (€)', field: 'amount', id: 't-amount',
+        hint: el('p', { class: 'field__hint calc', id: 't-calc', text: calcText() }),
+        input: input({ id: 't-amount', value: d.amountText, inputmode: 'decimal', placeholder: '0,00', cls: 'input--amount', onInput: (v) => {
+          const c = calc();
+          const was = d.amountEdited;
+          d.amountText = v;
+          d.amountEdited = !(c && c.cents !== null && parseEuroInput(v) === c.cents);
+          if (was !== d.amountEdited) draw();
+        } }) }),
+      d.amountEdited ? el('div', { class: 'field' }, button('Ricalcola', () => { d.amountEdited = false; refresh(); draw(); }, { kind: 'plain', small: true, id: 't-recalc', icon: 'undo' })) : null));
+    const eurOpts = C.sortedAccounts(state).filter((a) => a.kind === 'eur').map((a) => ({ value: a.id, label: a.name }));
+    if (d.eurId && !eurOpts.some((o) => o.value === d.eurId)) eurOpts.unshift({ value: d.eurId, label: C.accountLabel(state, d.eurId) });
+    out.push(el('div', { class: 'form-group' },
+      field({ label: buy ? 'Dal conto in euro' : 'Sul conto in euro', field: 'eurId', id: 't-eur',
+        input: select({ id: 't-eur', options: [{ value: '', label: 'Scegli…', disabled: true }, ...eurOpts], value: d.eurId, onChange: (v) => { d.eurId = v; } }) }),
+      field({ label: 'Data', field: 'date', id: 't-date', input: input({ id: 't-date', type: 'date', value: d.date, cls: 'input--date', onInput: (v) => { d.date = v; } }) }),
+      field({ label: 'Descrizione', field: 'description', id: 't-desc', input: input({ id: 't-desc', value: d.description, maxlength: 80, placeholder: 'Facoltativa', onInput: (v) => { d.description = v; } }) })));
+    out.push(el('div', { class: 'form-group' },
+      field({ label: 'Note', field: 'note', id: 't-note', input: textarea({ id: 't-note', value: d.note, maxlength: 500, placeholder: 'Facoltative', onInput: (v) => { d.note = v; } }) })));
+    out.push(el('p', { class: 'section-footer', text: 'Il patrimonio in euro cambia dell\'importo; il conto crypto della quantità. Nessun prezzo viene preso da internet.' }));
+    if (editing) {
+      out.push(el('div', { class: 'list' }, el('button', { type: 'button', class: 'row row--danger row--noicon', id: 't-delete', text: 'Elimina movimento', on: { click: () => {
+        api.close();
+        if (attempt(() => store.deleteMovement(editing.id))) toast('Movimento eliminato', { undo: () => store.restoreMovement(editing.id) });
+      } } })));
+    }
+    return out;
+  }
+
+  function collect() {
+    const qty = parseQtyInput(d.qtyText);
+    if (!qty) throw new ValidationError(d.qtyText.trim() ? 'Quantità non valida (es. 0,01)' : 'Inserisci la quantità', 'qty');
+    const price = parseEuroInput(d.priceText);
+    if (!price) throw new ValidationError(d.priceText.trim() ? 'Prezzo non valido (es. 60.000,00)' : 'Inserisci il prezzo', 'price');
+    const cents = tradeEuroCents(qty, price);
+    if (cents === null) throw new ValidationError('Quantità o prezzo troppo grandi', 'amount');
+    const euro = d.amountEdited ? parseEuroInput(d.amountText) : cents;
+    if (!euro) throw new ValidationError(d.amountText.trim() ? 'Importo non valido (es. 600,50)' : 'Inserisci l\'importo', 'amount');
+    if (!d.eurId) throw new ValidationError('Scegli il conto in euro', 'eurId');
+    const buy = d.side === 'compra';
+    return {
+      type: 'trasferimento', trade: d.side, price, date: d.date, description: d.description, note: d.note,
+      accountId: buy ? d.eurId : d.cryptoId, toAccountId: buy ? d.cryptoId : d.eurId,
+      amount: buy ? euro : qty, amountTo: buy ? qty : euro,
+    };
+  }
+
+  // Gli errori dello store usano i campi del movimento: si riportano sui campi del foglio.
+  const FIELD_MAP = { compra: { amount: 'amount', amountTo: 'qty', accountId: 'eurId', toAccountId: 'eurId' }, vendi: { amount: 'qty', amountTo: 'amount', accountId: 'eurId', toAccountId: 'eurId' } };
+  const asset0 = cryptoAcc()?.asset || '';
+  const api = sheet({
+    title: d.side === 'compra' ? `Compra ${asset0}` : `Vendi ${asset0}`,
+    onSave: () => {
+      const inp = collect();
+      try {
+        const mov = editing ? store.updateMovement(editing.id, inp) : store.addMovement(inp);
+        toast(editing ? 'Modifiche salvate' : d.side === 'compra' ? 'Acquisto salvato' : 'Vendita salvata');
+        return mov;
+      } catch (e) {
+        if (e instanceof ValidationError && FIELD_MAP[d.side][e.field]) throw new ValidationError(e.message, FIELD_MAP[d.side][e.field]);
+        throw e;
+      }
+    },
+    content: (s) => { body = s.body; body.append(...build()); },
+  });
+  if (!editing) setTimeout(() => document.getElementById('t-qty')?.focus(), 0);
   return api;
 }
 

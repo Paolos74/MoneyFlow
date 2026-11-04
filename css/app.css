@@ -35,6 +35,9 @@
   --bar-bg: rgba(242, 245, 243, 0.82);
   --shadow: 0 1px 2px rgba(0, 0, 0, 0.05), 0 4px 16px rgba(0, 0, 0, 0.05);
   --backdrop: rgba(0, 0, 0, 0.32);
+  /* Card in evidenza (Patrimonio): smeraldo pieno, testo bianco ≥ 5,48:1 (anche col riflesso 4,70:1). */
+  --hero-bg: linear-gradient(150deg, #047857 0%, #065F46 60%, #064E3B 100%);
+  --hero-shadow: 0 10px 28px rgba(4, 120, 87, 0.30);
 }
 
 :root[data-theme="dark"] {
@@ -55,6 +58,8 @@
   --bar-bg: rgba(22, 28, 25, 0.82);
   --shadow: 0 1px 2px rgba(0, 0, 0, 0.4);
   --backdrop: rgba(0, 0, 0, 0.55);
+  --hero-bg: linear-gradient(150deg, #065F46 0%, #064E3B 70%, #053D2E 100%);
+  --hero-shadow: 0 1px 2px rgba(0, 0, 0, 0.4);
 }
 
 @media (prefers-color-scheme: dark) {
@@ -76,6 +81,8 @@
     --bar-bg: rgba(22, 28, 25, 0.82);
     --shadow: 0 1px 2px rgba(0, 0, 0, 0.4);
     --backdrop: rgba(0, 0, 0, 0.55);
+    --hero-bg: linear-gradient(150deg, #065F46 0%, #064E3B 70%, #053D2E 100%);
+    --hero-shadow: 0 1px 2px rgba(0, 0, 0, 0.4);
   }
 }
 
@@ -193,6 +200,9 @@ button.row:active, a.row:active { background: var(--surface-2); }
 .hero__label { font-size: 15px; color: var(--muted); margin: 0 0 2px; }
 .hero__value, .card .hero__value { color: var(--text); font-family: var(--font-num); font-size: 38px; line-height: 1.1; font-weight: 600; letter-spacing: -.02em; font-variant-numeric: tabular-nums; margin: 0 0 8px; overflow-wrap: anywhere; }
 .hero__sub { margin: 6px 0 0; font-size: 15px; color: var(--muted); }
+/* Numero grande con segno: cash flow, Da ricevere, conguaglio. */
+.card .hero__value.is-income { color: var(--income); }
+.card .hero__value.is-danger { color: var(--danger); }
 /* Numeri piccoli: font di sistema con cifre tabulari (il serif resta ai numeri grandi). */
 .num { font-variant-numeric: tabular-nums; font-weight: 600; }
 
@@ -468,3 +478,75 @@ a.card { display: block; color: inherit; text-decoration: none; }
 .goal__title { flex: 1; min-width: 0; margin: 0; font-size: 20px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .card__head .tag { flex: none; white-space: nowrap; }
 a.card:active { opacity: .8; }
+
+/* ---- Design v2 (verde smeraldo protagonista) ---- */
+
+/* Card in evidenza: Patrimonio in Home e in Conti. */
+.card.card--hero { position: relative; overflow: hidden; background: var(--hero-bg); color: #fff; box-shadow: var(--hero-shadow); }
+.card--hero::after { content: ""; position: absolute; right: -70px; bottom: -110px; width: 240px; height: 240px; border-radius: 50%; background: radial-gradient(closest-side, rgba(255, 255, 255, 0.10), rgba(255, 255, 255, 0)); pointer-events: none; }
+.card--hero > * { position: relative; z-index: 1; }
+.card.card--hero .card__title, .card.card--hero .hero__value, .card.card--hero .hero__sub { color: #fff; }
+.card.card--hero .card__link { color: #fff; background: rgba(0, 0, 0, 0.2); border-radius: 18px; padding: 0 14px; display: inline-flex; align-items: center; font-weight: 600; }
+.card.card--hero .card__link:active { opacity: .7; }
+/* La pillola resta alta 36 px a vista; l'area di tocco sale a 44 px (PWA-BASE §8). */
+.card.card--hero .card__link { position: relative; }
+.card.card--hero .card__link::before { content: ""; position: absolute; inset: -4px 0; }
+
+/* Sottotitoli colorati nelle card (Completato, Scadenza passata): vincono sul grigio di .hero__sub. */
+.hero__sub.is-income { color: var(--income); }
+.hero__sub.is-danger { color: var(--danger); }
+
+/* Obiettivo completato: etichetta piena verde (bianco su #047857 = 5,48:1). */
+.tag--done { background: var(--accent-fill); color: var(--on-accent); font-weight: 600; }
+
+/* Stima delle tasse: blocchi di calcolo con titolo piccolo, totali in grassetto, note in riquadro. */
+.ledger { margin: 16px 0 0; padding: 12px 0 0; border-top: 0.5px solid var(--separator); }
+.ledger__title { font-size: 13px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); margin: 0 0 2px; }
+.card .ledger__note { font-size: 13px; color: var(--muted); margin: 4px 0 6px; line-height: 1.45; }
+.kv--minus > span:first-child { color: var(--muted); }
+.kv + .kv.kv--total, .kv.kv--total { border-top: 1.5px solid var(--text); font-weight: 600; margin-top: 2px; }
+.kv--total > span:first-child { font-weight: 600; }
+.card .note { display: flex; gap: 10px; align-items: flex-start; background: var(--surface-2); border-radius: var(--radius-sm); padding: 10px 12px; margin: 14px 0; font-size: 13px; line-height: 1.45; color: var(--muted); }
+.card .note > svg { flex: none; width: 18px; height: 18px; color: var(--accent); margin-top: 1px; }
+.card .note p { margin: 0 0 6px; color: var(--muted); }
+.card .note p:last-child { margin: 0; }
+.card .note .note__strong { color: var(--text); font-weight: 600; }
+.card .note.note--warn { background: var(--danger-soft); color: var(--danger); font-weight: 500; }
+.card--estimate .btn-row .btn { width: 100%; }
+
+/* Esito della lettura del PDF e del calcolo Compra/Vendi. */
+.callout { display: flex; gap: 10px; align-items: flex-start; border-radius: var(--radius-sm); padding: 10px 12px; margin: 10px 0 2px; background: var(--surface-2); }
+.callout > svg { flex: none; width: 20px; height: 20px; color: var(--muted); margin-top: 1px; }
+.callout p { margin: 0 0 4px; font-size: 13px; line-height: 1.4; color: var(--muted); }
+.callout p:last-child { margin: 0; }
+.callout .callout__title { font-size: 15px; font-weight: 600; color: var(--text); }
+.callout--ok { background: var(--accent-soft); }
+.callout--ok > svg, .callout--ok .callout__title { color: var(--accent); }
+.callout--error { background: var(--danger-soft); }
+.callout--error > svg, .callout--error .callout__title { color: var(--danger); }
+.field__hint.calc { background: var(--surface-2); border-radius: 10px; padding: 8px 10px; margin: 6px 0 4px; font-variant-numeric: tabular-nums; }
+
+/* Fogli: intestazioni dei gruppi in maiuscolo come in iOS, testo sopra un gruppo staccato dal gruppo. */
+.sheet__body p.field__label { font-size: 13px; text-transform: uppercase; letter-spacing: .04em; margin: 0 16px 6px; }
+.sheet__body .section-footer:has(+ .form-group) { margin: 0 16px 8px; }
+
+/* Metti da parte: intestazione con icona, obiettivi col loro colore e la barra di avanzamento. */
+.sheet-intro { display: flex; gap: 12px; align-items: center; background: var(--surface); border-radius: var(--radius); padding: 12px 14px; margin: 0 0 16px; }
+.sheet-intro__icon { flex: none; width: 40px; height: 40px; border-radius: 12px; display: grid; place-items: center; background: var(--accent-fill); color: var(--on-accent); }
+.sheet-intro__icon svg { width: 22px; height: 22px; }
+.sheet-intro p { margin: 0; font-size: 15px; line-height: 1.4; }
+.setaside__name { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.setaside__name span:last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.setaside__bar { padding: 2px 16px 14px; }
+.setaside__bar .progress { margin: 0; }
+
+/* Righe con azioni: i pulsanti non vanno a capo dentro; se non stanno in una riga vanno a capo allineati a destra.
+   Dove serve il principale sopra, è il primo nel DOM: ordine del focus = ordine visivo (WCAG 2.4.3). */
+.row__actions { flex-wrap: wrap; justify-content: flex-end; }
+.row__actions .btn { white-space: nowrap; }
+
+/* Con un foglio aperto il toast va in alto, sotto l'intestazione del foglio (24 px di margine + 76 px di grabber
+   e riga Annulla · Titolo · Salva), così non copre né i pulsanti del foglio né la pillola Offline. */
+body:has(.sheet) .toast-root { bottom: auto; top: calc(var(--safe-top) + 24px + 76px); }
+/* Un toast senza pulsante non si tocca: lascia passare i tocchi ai controlli che copre. */
+.toast:not(:has(button)) { pointer-events: none; }

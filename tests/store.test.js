@@ -2,7 +2,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { createStore, ValidationError, StorageError, DATA_KEY, PALETTE } from '../js/store.js';
+import { createStore, ValidationError, StorageError, DATA_KEY, PALETTE, SCHEMA_VERSION } from '../js/store.js';
+import { tradeEuroCents } from '../js/money.js';
 import { memoryStorage, clock, seqUuid } from './helpers.js';
 
 function setup(initial) {
@@ -217,4 +218,87 @@ test('conferma di tutte le scadenze: un movimento ciascuna, collegate al program
   store.deleteAccount(eur.id);
   expectValidation(() => store.confirmAll(s.id, ['2025-03-05', '2025-04-05']));
   assert.equal(store.getState().movements.length, n);
+});
+
+test('v2: SCHEMA_VERSION resta 1 (solo campi facoltativi)', () => {
+  assert.equal(SCHEMA_VERSION, 1);
+});
+
+test('v2 Compra/Vendi: trasferimento euro↔crypto con prezzo unitario', () => {
+  const { store, eur, btc, cash } = base();
+  // 0,01 BTC a 60.000,00 €: calcolato 600,00 €, corretto a 600,50 € per la commissione
+  const qty = 1000000;
+  const price = 6000000;
+  assert.equal(tradeEuroCents(qty, price), 60000);
+  const m = store.addMovement({ type: 'trasferimento', trade: 'compra', date: '2025-03-01', amount: 60050, accountId: eur.id, toAccountId: btc.id, amountTo: qty, price });
+  assert.equal(m.trade, 'compra');
+  assert.equal(m.price, 6000000);
+  assert.equal(m.amount, 60050);
+  assert.equal(m.amountTo, 1000000);
+  const v = store.addMovement({ type: 'trasferimento', trade: 'vendi', date: '2025-03-02', amount: 500000, accountId: btc.id, toAccountId: eur.id, amountTo: 30000, price });
+  assert.equal(v.trade, 'vendi');
+  // Vendi da euro → crypto rifiutata
+  expectValidation(() => store.addMovement({ type: 'trasferimento', trade: 'vendi', date: '2025-03-01', amount: 100, accountId: eur.id, toAccountId: btc.id, amountTo: 1, price }), 'accountId');
+  // prezzo mancante
+  expectValidation(() => store.addMovement({ type: 'trasferimento', trade: 'compra', date: '2025-03-01', amount: 100, accountId: eur.id, toAccountId: btc.id, amountTo: 1 }), 'price');
+  // euro → euro non è un Compra
+  expectValidation(() => store.addMovement({ type: 'trasferimento', trade: 'compra', date: '2025-03-01', amount: 100, accountId: eur.id, toAccountId: cash.id, price }), 'accountId');
+  // trasferimento normale: nessun campo nuovo
+  const t = store.addMovement({ type: 'trasferimento', date: '2025-03-01', amount: 100, accountId: eur.id, toAccountId: cash.id });
+  assert.equal(t.trade, null);
+  assert.equal(t.price, null);
+});
+
+test('v2 busta paga: campi facoltativi sull\'entrata', () => {
+  const { store, cat, eur } = base();
+  const stip = cat('entrata', 'Stipendio').id;
+  const m = store.addMovement({ type: 'entrata', date: '2025-03-27', amount: 200000, accountId: eur.id, categoryId: stip, gross: 280000, payslip: { taxable: 250000, irpef: 40000 } });
+  assert.deepEqual(m.payslip, { contributions: null, taxable: 250000, irpef: 40000, pension: null, deductions: null });
+  expectValidation(() => store.addMovement({ type: 'entrata', date: '2025-03-27', amount: 1, accountId: eur.id, categoryId: stip, payslip: { irpef: -1 } }), 'ps-irpef');
+  const empty = store.addMovement({ type: 'entrata', date: '2025-03-27', amount: 1, accountId: eur.id, categoryId: stip, payslip: { taxable: null } });
+  assert.equal(empty.payslip, null);
+  const u = store.addMovement({ type: 'uscita', date: '2025-03-27', amount: 100, accountId: eur.id, categoryId: cat('uscita', 'Spesa').id, payslip: { taxable: 5 } });
+  assert.equal(u.payslip, null);
+  const up = store.updateMovement(m.id, { amount: 210000 });
+  assert.deepEqual(up.payslip, m.payslip);
+  assert.equal(up.gross, 280000);
+});
+
+test('v2 obiettivi: quota mensile, accantonamenti per mese, allocateGoals tutto o niente', () => {
+  const { store, storage } = base();
+  const g = store.addGoal({ name: 'Bici', target: 100000, saved: 0, monthly: 5000, color: PALETTE[4] });
+  assert.equal(g.monthly, 5000);
+  assert.deepEqual(g.log, {});
+  expectValidation(() => store.addGoal({ name: 'X', target: 100, monthly: 0, color: PALETTE[0] }), 'monthly');
+  store.adjustGoal(g.id, 3000, '2026-05-10');
+  assert.equal(store.find('goal', g.id).log['2026-05'], 3000);
+  store.adjustGoal(g.id, -1000, '2026-05-20');
+  assert.equal(store.find('goal', g.id).log['2026-05'], 2000);
+  store.adjustGoal(g.id, 500);
+  assert.equal(store.find('goal', g.id).saved, 2500);
+  assert.equal(store.find('goal', g.id).log['2026-05'], 2000);
+
+  const h = store.addGoal({ name: 'Telefono', target: 50000, color: PALETTE[5] });
+  let writes = 0;
+  const orig = storage.setItem.bind(storage);
+  storage.setItem = (k, v) => { writes++; orig(k, v); };
+  const out = store.allocateGoals([{ id: g.id, amount: 5000 }, { id: h.id, amount: 2000 }], '2026-06-27');
+  assert.equal(writes, 1);
+  assert.equal(out.length, 2);
+  assert.equal(store.find('goal', g.id).saved, 7500);
+  assert.equal(store.find('goal', g.id).log['2026-06'], 5000);
+  assert.equal(store.find('goal', h.id).saved, 2000);
+
+  // un obiettivo eliminato: niente cambia
+  store.deleteGoal(h.id);
+  const before = store.getState();
+  expectValidation(() => store.allocateGoals([{ id: g.id, amount: 100 }, { id: h.id, amount: 100 }], '2026-06-28'), `alloc-${h.id}`);
+  expectValidation(() => store.allocateGoals([{ id: g.id, amount: 0 }], '2026-06-28'), `alloc-${g.id}`);
+  assert.equal(store.getState(), before);
+
+  // storage pieno
+  storage.failOn = (k) => k === DATA_KEY;
+  assert.throws(() => store.allocateGoals([{ id: g.id, amount: 100 }], '2026-06-28'), StorageError);
+  assert.equal(store.getState(), before);
+  assert.equal(store.find('goal', g.id).saved, 7500);
 });

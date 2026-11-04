@@ -1,5 +1,5 @@
 // Impostazioni: tema, categorie, budget, backup, esportazione CSV, sincronizzazione Firebase,
-// istruzioni per installare l'app su Android e iPhone, versione.
+// strumenti (simulatore fondo pensione), istruzioni per installare l'app su Android e iPhone, versione.
 
 import { el, list, row, section, segmented, sheet, field, input, colorPicker, toast, button, confirmDialog, shareOrDownload, attempt, card } from '../ui.js';
 import { formatEuro, parseEuroInput, formatEuroPlain } from '../money.js';
@@ -10,6 +10,7 @@ import { createBackup, parseBackup, backupFileName, backupSummary } from '../bac
 import { buildCsv, csvFileName, CSV_FORMATS } from '../csv.js';
 import * as C from '../calc.js';
 import { periodPicker } from './parts.js';
+import { render as fondoPensione } from './fondo-pensione.js';
 
 const SECTIONS = {
   tema: { title: 'Tema', icon: 'sun', color: '#D97706' },
@@ -19,6 +20,8 @@ const SECTIONS = {
   csv: { title: 'Esporta CSV', icon: 'doc', color: '#0891B2' },
   sync: { title: 'Sincronizzazione', icon: 'cloud', color: '#4F46E5' },
   installa: { title: 'Installa l\'app', icon: 'phone', color: '#047857' },
+  // Scelta provvisoria: il simulatore sta in Impostazioni → Strumenti (la schermata "Altro" non esiste).
+  'fondo-pensione': { title: 'Se aumento il fondo pensione', icon: 'coin', color: '#047857' },
 };
 
 let csvPeriod = null;
@@ -29,7 +32,7 @@ export function render(root, ctx) {
   const sec = ctx.path[1];
   if (sec && SECTIONS[sec]) {
     ctx.header({ title: SECTIONS[sec].title, back: { href: '#impostazioni', label: 'Impostazioni' } });
-    ({ tema, categorie, budget, backup, csv, sync, installa })[sec](root, ctx);
+    ({ tema, categorie, budget, backup, csv, sync, installa, 'fondo-pensione': fondoPensione })[sec](root, ctx);
     return;
   }
   ctx.header({ title: 'Impostazioni', back: { href: '#home', label: 'Home' } });
@@ -42,10 +45,11 @@ export function render(root, ctx) {
   };
   root.append(section({ title: 'Generale' }, list(...['tema', 'categorie', 'budget'].map((k) => row({ icon: SECTIONS[k].icon, color: SECTIONS[k].color, title: SECTIONS[k].title, subtitle: sub[k], href: `#impostazioni/${k}`, id: `set-${k}` })))));
   root.append(section({ title: 'Dati' }, list(...['backup', 'csv', 'sync'].map((k) => row({ icon: SECTIONS[k].icon, color: SECTIONS[k].color, title: SECTIONS[k].title, subtitle: sub[k], href: `#impostazioni/${k}`, id: `set-${k}` })))));
+  root.append(section({ title: 'Strumenti' }, list(row({ icon: SECTIONS['fondo-pensione'].icon, color: SECTIONS['fondo-pensione'].color, title: SECTIONS['fondo-pensione'].title, subtitle: 'Stima di costo e risparmio di tasse', href: '#impostazioni/fondo-pensione', id: 'set-fondo-pensione' }))));
   root.append(section({ title: 'App' }, list(row({ icon: 'phone', color: SECTIONS.installa.color, title: SECTIONS.installa.title, subtitle: ctx.install.installed() ? 'Già installata' : 'Android e iPhone', href: '#impostazioni/installa', id: 'set-installa' }),
     row({ icon: 'info', color: '#64748B', title: 'Versione', value: version || '…', valueClass: 'is-muted', id: 'set-version' }))));
   root.append(el('p', { class: 'section-footer', text: 'MoneyFlow salva i dati su questo dispositivo. Nessuna notifica, nessun prezzo da internet.' }));
-  if (!version) ctx.getVersion().then((v) => { version = v || 'moneyflow-v1 (senza service worker)'; ctx.rerender(); });
+  if (!version) ctx.getVersion().then((v) => { version = v || 'moneyflow-v2 (senza service worker)'; ctx.rerender(); });
 }
 
 function tema(root, ctx) {
@@ -217,7 +221,7 @@ function csv(root, ctx) {
       if (r !== 'aborted') toast(r === 'downloaded' ? `CSV scaricato: ${file.name}` : 'CSV condiviso');
     } catch (e) { toast('Errore interno: ' + (e?.message || e), { error: true }); }
   }, { kind: 'primary', icon: 'download', block: true, id: 'csv-export', disabled: !!pp.range.error })));
-  root.append(el('p', { class: 'section-footer', text: 'Colonne: Data, Conto, Tipo, Categoria, Descrizione, Importo. Le uscite hanno il segno meno e l\'importo intero pagato.' }));
+  root.append(el('p', { class: 'section-footer', text: 'Colonne: Data, Conto, Tipo, Categoria, Descrizione, Importo. Le uscite hanno il segno meno e l\'importo contato (senza la quota esclusa).' }));
 }
 
 // ---- Sincronizzazione ----
