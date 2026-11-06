@@ -1,15 +1,17 @@
-// Home: quanto ti resta (v5: sul budget complessivo), quanto metti da parte (v5), Da confermare,
-// Da ricevere, budget, obiettivi, patrimonio, promemoria backup. ⚙︎ porta alle Impostazioni.
+// Home: quanto ti resta (v5: sul budget complessivo), promemoria backup, pagamenti programmati con Da confermare,
+// quanto metti da parte (v5), scorciatoie (Chi mi deve, budget superati). ⚙ porta alle Impostazioni.
+// UX v6 (proposte 1–10, approvate in prova): solo disposizione e aspetto, calcoli invariati.
 
 import { el, card, icon, emptyState, button, list, row } from '../ui.js';
 import { formatEuro, formatEuroSigned, formatPercent } from '../money.js';
 import { formatDateIt, MONTHS, parseISO } from '../dates.js';
 import * as C from '../calc.js';
 import { budgetPeriod, remaining, savedInPeriod } from '../period.js';
-import { periodText, remainingHero, budgetAdviceBlock, setBudgetsInvite } from './budget.js';
-import { sortedInvestments, etfSummary } from '../invest.js';
-import { pendingRow, pendingGroups, pendingGroupRow } from './parts.js';
+import { nextOccurrence } from '../recurrence.js';
+import { periodText, remainingHero, budgetAdviceHome, setBudgetsInvite } from './budget.js';
+import { pendingRow, pendingGroups, pendingGroupRow, shortDate, scheduledTitle, amountIn } from './parts.js';
 import { openAccountForm } from './conti.js';
+import { openScheduledForm } from './movimento-form.js';
 
 export function render(root, ctx) {
   const { store } = ctx;
@@ -25,12 +27,6 @@ export function render(root, ctx) {
       el('p', { text: 'I dati salvati su questo dispositivo erano danneggiati: ne è stata tenuta una copia e l\'app è ripartita da zero. Puoi importare un backup.' }),
       button('Importa un backup', () => ctx.go('impostazioni/backup'), { kind: 'primary', small: true })));
   }
-  if (C.backupDue(ctx.prefs.get(), Date.now()) && C.hasData(state)) {
-    const last = ctx.prefs.get().lastBackupAt;
-    root.append(card({ title: 'Promemoria backup', cls: 'card--warn' },
-      el('p', { text: last ? 'L\'ultimo backup ha più di 30 giorni.' : 'Non hai ancora fatto un backup dei tuoi dati.' }),
-      button('Fai il backup', () => ctx.go('impostazioni/backup'), { kind: 'primary', small: true, id: 'home-backup' })));
-  }
 
   const accounts = C.sortedAccounts(state);
   if (!accounts.length) {
@@ -41,65 +37,112 @@ export function render(root, ctx) {
     }));
   }
 
-  // Quanto ti resta (numero protagonista). v5: somma dei budget − tutte le uscite del periodo; senza budget
-  // il calcolo v4 (entrate − uscite − programmati da pagare) con l'invito "Imposta i budget".
+  // Quanto ti resta (numero protagonista). v6: somma dei budget − tutte le uscite − programmati da pagare del
+  // periodo, con la scomposizione discreta Budget / Speso / Programmati su una riga (UX v6 proposta 2); senza
+  // budget il calcolo v4 (entrate − uscite − programmati da pagare) con l'invito "Imposta i budget".
   const p = budgetPeriod(state, today, ctx.prefs.get().budgetPeriod);
   const r = remaining(state, p, today);
   const budgetMode = r.mode === 'budget';
   root.append(remainingHero({
     title: 'Quanto ti resta', prefix: 'home', r, label: `Periodo: ${periodText(p)} · fino al ${formatDateIt(p.to)}`,
-    link: el('a', { class: 'card__link', href: '#budget', text: 'Budget' }),
+    link: el('a', { class: 'card__link', href: '#budget', text: 'Budget' }), compactToday: true,
   },
   budgetMode
-    ? el('div', { class: 'stats' },
+    ? el('div', { class: 'stats stats--line' },
       stat('Budget', formatEuro(r.budget), 'home-budget-total'),
-      stat('Uscite', formatEuro(r.expense), 'month-expense'))
-    : el('div', { class: 'stats' },
-      stat('Entrate', formatEuro(r.income), 'month-income', 'is-income', 'stat--income'),
-      stat('Uscite', formatEuro(r.expense), 'month-expense', '', 'stat--expense'),
-      stat('Programmati', formatEuro(r.planned), 'home-planned', '', 'stat--planned')),
-  budgetMode ? budgetAdviceBlock(state, p, 'home') : setBudgetsInvite('home-set-budgets')));
+      stat('Speso', formatEuro(r.expense), 'month-expense'),
+      stat('Programmati', formatEuro(r.planned), 'home-planned'))
+    : el('div', { class: 'stats stats--line' },
+      stat('Entrate', formatEuro(r.income), 'month-income', 'is-income'),
+      stat('Uscite', formatEuro(r.expense), 'month-expense'),
+      stat('Programmati', formatEuro(r.planned), 'home-planned')),
+  budgetMode ? budgetAdviceHome(state, p) : setBudgetsInvite('home-set-budgets')));
 
-  // Quanto metti da parte (decisione v5 §2): entrate − uscite del periodo in grande, sotto obiettivi e
-  // spostato verso deposito e investimenti. Tono calmo: negativo nel colore del testo, nessun avviso.
-  const sv = savedInPeriod(state, p);
-  const netText = formatEuroSigned(sv.net);
-  const small = (v, id) => el('span', { id, class: v === 0 ? 'is-muted' : '', text: formatEuro(v) });
-  root.append(card({ title: 'Quanto metti da parte', tint: 'pink', icon: 'piggy', cls: 'card--saved', id: 'home-saved' },
-    el('p', { class: 'hero__label', text: 'Entrate meno uscite del periodo' }),
-    el('p', { class: 'saved__value' + (netText.length > 11 ? ' is-long' : '') + (sv.net < 0 ? ' is-neg' : ''), id: 'home-saved-net', text: netText }),
-    sv.income > 0 && sv.net >= 0 ? el('p', { class: 'hero__sub', id: 'home-saved-rate', text: `Risparmio: ${formatPercent(sv.rate)} delle entrate` }) : null,
-    el('div', { class: 'kv' }, el('span', { text: p.mode === 'salary' ? `Negli obiettivi di ${MONTHS[parseISO(p.from).m - 1]}` : 'Negli obiettivi' }), small(sv.goals, 'home-saved-goals')),
-    el('div', { class: 'kv' }, el('span', { text: 'Verso deposito e investimenti' }), small(sv.moved, 'home-saved-moved'))));
-
-  // Da confermare
-  const pending = C.pendingList(state, today);
-  if (pending.length) {
-    root.append(card({ title: `Da confermare (${pending.length})`, tint: 'violet', icon: 'clock', link: el('a', { class: 'card__link', href: '#da-confermare', text: 'Tutti' }) },
-      // Una riga per programmato: con più scadenze arretrate "N scadenze" e Vedi.
-      el('div', { class: 'list list--flat' }, pendingGroups(pending).slice(0, 3).map((g, i) => (g.items.length === 1 ? pendingRow(ctx, g.items[0], i) : pendingGroupRow(ctx, g, i))))));
+  // Promemoria backup (UX v6 proposta 1): una riga sotto la card protagonista. Regola dei 30 giorni invariata.
+  if (C.backupDue(ctx.prefs.get(), Date.now()) && C.hasData(state)) {
+    const text = ctx.prefs.get().lastBackupAt ? 'Ultimo backup più di 30 giorni fa' : 'Non hai ancora fatto un backup';
+    root.append(el('a', { class: 'notice-row', href: '#impostazioni/backup', id: 'home-backup', attrs: { 'aria-label': `${text}. Fai il backup` } },
+      el('span', { class: 'notice-row__icon' }, icon('clock', 18)),
+      el('span', { class: 'notice-row__text', text }),
+      el('span', { class: 'notice-row__action' }, 'Fai il backup', icon('chevron', 12))));
   }
 
-  // Informazioni secondarie: chi mi deve, budget, programmati, patrimonio (il numero grande è in Conti).
+  // Pagamenti programmati (UX v6 proposte 6 e 7): le voci da confermare in righe compatte, altrimenti il
+  // prossimo pagamento, altrimenti l'invito ad aggiungerne uno.
+  root.append(scheduledCard(ctx, state, today));
+
+  // Quanto metti da parte (decisione v5 §2, UX v6 proposta 5): entrate − uscite del periodo accanto al titolo,
+  // sotto obiettivi e spostato verso deposito e investimenti; tocco → Statistiche. Nascosta senza movimenti nel
+  // periodo. Tono calmo: negativo nel colore del testo, nessun avviso.
+  const sv = savedInPeriod(state, p);
+  if (sv.income > 0 || sv.expense > 0) {
+    const goalsLabel = p.mode === 'salary' ? `negli obiettivi di ${MONTHS[parseISO(p.from).m - 1]}` : 'negli obiettivi';
+    const parts = [];
+    if (sv.income > 0 && sv.net >= 0) parts.push(el('span', { id: 'home-saved-rate', text: `${formatPercent(sv.rate)} delle entrate` }));
+    parts.push(el('span', { id: 'home-saved-goals', text: `${formatEuro(sv.goals)} ${goalsLabel}` }));
+    parts.push(el('span', { id: 'home-saved-moved', text: `${formatEuro(sv.moved)} verso deposito e investimenti` }));
+    root.append(el('a', { class: 'card card--t-pink card--saved card--saved-compact', href: '#statistiche', id: 'home-saved' },
+      el('div', { class: 'card__head' },
+        el('h2', { class: 'card__title' }, el('span', { class: 'card__badge' }, icon('piggy')), el('span', { text: 'Quanto metti da parte' })),
+        el('span', { class: 'saved__head' },
+          el('span', { class: 'saved__value' + (sv.net < 0 ? ' is-neg' : ''), id: 'home-saved-net', text: formatEuroSigned(sv.net) }),
+          el('span', { class: 'row__chev' }, icon('chevron')))),
+      el('p', { class: 'saved__line' }, parts.flatMap((n, i) => (i ? [' · ', n] : [n])))));
+  }
+
+  // Scorciatoie (UX v6 proposta 8): solo quando hanno qualcosa da dire. Il patrimonio è in Conti.
   const credits = C.openCredits(state);
   const debts = C.debtsByPerson(state);
-  const nw = C.netWorth(state);
-  // v5: con ETF con quote il patrimonio li comprende ("Conti in euro e ETF"), le crypto restano a parte.
-  const withEtf = sortedInvestments(state).some((e) => etfSummary(state, e.id).qty > 0);
-  const nwSub = withEtf ? 'Conti in euro e ETF' + (nw.crypto.length ? ' · ' + C.cryptoLine(nw) : '') : nw.crypto.length ? C.cryptoLine(nw) : 'Totale dei conti in euro';
-  const budgets = C.budgetStatus(state, p);
-  const over = budgets.filter((b) => b.over).length;
-  root.append(el('div', { class: 'section' }, list(
+  // v6 (risposta 1B): i "budget superati" contano anche i programmati della categoria.
+  const over = C.budgetStatus(state, p, today).filter((b) => b.over);
+  const shortcuts = [
     credits.total > 0 ? row({
       icon: 'hand', color: 'var(--accent-fill)', title: debts.length ? 'Chi mi deve' : 'Da ricevere',
       subtitle: debts.length ? debts.slice(0, 3).map((d) => d.person).join(', ') + (debts.length > 3 ? '…' : '') : `${credits.items.length} ${credits.items.length === 1 ? 'quota anticipata' : 'quote anticipate'}`,
       value: formatEuro(credits.total), href: '#da-ricevere', id: 'home-credits',
     }) : null,
-    row({ icon: 'gauge', color: 'var(--amber-fill)', title: 'Budget e obiettivi', subtitle: budgets.length ? (over ? `${over} ${over === 1 ? 'budget superato' : 'budget superati'}` : 'Tutti i budget nei limiti') : 'Piano per categoria e obiettivi di risparmio', valueClass: over ? 'is-danger' : '', href: '#budget', id: 'home-budget' }),
-    row({ icon: 'repeat', color: 'var(--violet-fill)', title: 'Pagamenti programmati', subtitle: 'Abbonamenti, affitto, bollette', href: '#programmati', id: 'home-scheduled' }),
-    accounts.length ? row({ icon: 'cash', color: 'var(--butter-fill)', title: 'Patrimonio', subtitle: nwSub, value: formatEuro(nw.totalCents), href: '#conti', id: 'home-networth', attrs: { 'data-networth': String(nw.totalCents) } }) : null)));
+    over.length ? row({
+      icon: 'gauge', color: 'var(--amber-fill)', title: `${over.length} ${over.length === 1 ? 'budget superato' : 'budget superati'}`,
+      subtitle: over.slice(0, 3).map((b) => b.category.name).join(', ') + (over.length > 3 ? '…' : ''), href: '#budget', id: 'home-budget',
+    }) : null,
+  ].filter(Boolean);
+  if (shortcuts.length) root.append(el('div', { class: 'section' }, list(...shortcuts)));
 }
 
-function stat(label, value, id, cls = '', tileCls = '') {
-  return el('div', { class: `stat ${tileCls}` }, el('div', { class: 'stat__label', text: label }), el('div', { class: `stat__value ${cls}`, id, text: value }));
+function scheduledCard(ctx, state, today) {
+  const pending = C.pendingList(state, today);
+  const content = [];
+  if (pending.length) {
+    content.push(el('p', { class: 'card__label', text: `Da confermare (${pending.length})` }),
+      // Una riga per programmato: con più scadenze arretrate "N scadenze" e Vedi.
+      el('div', { class: 'list list--flat' }, pendingGroups(pending).slice(0, 3).map((g, i) => (g.items.length === 1 ? pendingRow(ctx, g.items[0], i, { compact: true }) : pendingGroupRow(ctx, g, i)))),
+      el('div', { class: 'card__foot' }, el('a', { class: 'card__link', href: '#da-confermare', id: 'home-pending-all', text: 'Vedi tutte' })));
+  } else {
+    const live = state.scheduled.filter((s) => !s.deleted);
+    // Prossima scadenza non gestita dopo oggi; a parità di data il programmato creato prima.
+    let next = null;
+    for (const s of [...live].sort((a, b) => a.createdAt - b.createdAt)) {
+      const d = nextOccurrence(s, today);
+      if (d && (!next || d < next.date)) next = { sched: s, date: d };
+    }
+    if (next) {
+      const t = scheduledTitle(state, next.sched);
+      content.push(el('div', { class: 'list list--flat' }, row({
+        icon: 'repeat', color: C.scheduledColor(state, next.sched), planned: true, title: `Prossimo: ${t}`, subtitle: shortDate(next.date, today),
+        value: amountIn(state, next.sched.accountId, next.sched.amount), valueClass: 'row__value--strong', href: '#programmati', id: 'home-next',
+      })));
+    } else {
+      content.push(el('div', { class: 'advice advice--plain' }, el('button', {
+        class: 'advice__row', type: 'button', id: 'home-scheduled-add', on: { click: () => openScheduledForm(ctx) },
+      },
+      el('span', { class: 'advice__icon' }, icon('repeat', 16)),
+      el('span', { class: 'advice__text', text: live.length ? 'Nessun pagamento in arrivo' : 'Nessun pagamento programmato' }),
+      el('span', { class: 'advice__action' }, 'Aggiungi', icon('chevron', 12)))));
+    }
+  }
+  return card({ title: 'Pagamenti programmati', tint: 'violet', icon: 'repeat', id: 'home-scheduled-card', cls: 'card--scheduled', link: el('a', { class: 'card__link', href: '#programmati', id: 'home-scheduled', text: 'Tutti' }) }, ...content);
+}
+
+function stat(label, value, id, cls = '') {
+  return el('div', { class: 'stat' }, el('div', { class: 'stat__label', text: label }), el('div', { class: `stat__value ${cls}`, id, text: value }));
 }

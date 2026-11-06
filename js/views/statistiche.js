@@ -65,10 +65,15 @@ export function render(root, ctx) {
 
   const nws = C.netWorthSeries(state, months);
   // v5: con gli ETF al valore di quella data (ultimo valore scritto a mano o prezzo d'acquisto).
-  const withEtf = nws.some((p) => p.totalCents !== p.eurCents);
-  root.append(card({ title: withEtf ? 'Andamento del patrimonio (conti in euro ed ETF)' : 'Andamento del patrimonio (conti in euro)', tint: 'emerald', icon: 'wallet' },
+  // v6: anche le crypto al valore di quella data (ultimo Aggiorna valore o prezzo d'acquisto).
+  const withEtf = nws.some((p) => p.investCents !== 0);
+  const withCrypto = nws.some((p) => p.cryptoCents !== 0);
+  const what = withEtf && withCrypto ? 'conti in euro, ETF e crypto' : withEtf ? 'conti in euro ed ETF' : withCrypto ? 'conti in euro e crypto' : 'conti in euro';
+  const valued = withEtf && withCrypto ? 'con ETF e crypto' : withEtf ? 'con gli ETF' : 'con le crypto';
+  root.append(card({ title: `Andamento del patrimonio (${what})`, tint: 'emerald', icon: 'wallet' },
     el('div', { class: 'chart', id: 'chart-line' }, svgNode(line(nws.map((p) => ({ label: monthShortLabel(p.month), value: p.totalCents })), { format: shortEuro, label: 'Patrimonio a fine mese' }))),
-    el('p', { class: 'hero__sub', text: withEtf ? 'Saldo a fine mese, con gli ETF al valore di quella data. Le crypto restano fuori dal totale in euro.' : 'Saldo a fine mese. Le crypto restano fuori dal totale in euro.' })));
+    el('p', { class: 'hero__sub', id: 'chart-line-sub', text: (withEtf || withCrypto ? `Saldo a fine mese, ${valued} al valore di quella data.` : 'Saldo a fine mese.')
+      + (!withCrypto && C.sortedAccounts(state).some((a) => a.kind === 'crypto') ? ' Le crypto senza valore in euro restano fuori dal totale.' : '') })));
 
   root.append(section({ title: 'Tasso di risparmio per mese', cls: 'section--t-teal' }, list(...bm.slice().reverse().map((m) => row({
     title: monthLabel(m.month), subtitle: `Entrate ${formatEuro(m.income)} · uscite ${formatEuro(m.expense)}`,

@@ -87,12 +87,17 @@ function amountInput(id, value, onInput, placeholder = '0,00') {
 }
 
 // Avviso budget sul periodo di budget della data della spesa (mese di calendario o dallo stipendio, v4).
+// v6: conta anche i programmati della categoria ancora da pagare nel periodo (come le barre del Piano).
 function budgetWarning(ctx, mov) {
   if (mov.type !== 'uscita') return;
   const state = ctx.store.getState();
   const period = budgetPeriod(state, mov.date, ctx.prefs?.get().budgetPeriod);
-  const st = C.budgetStatus(state, period).find((b) => b.category.id === mov.categoryId);
-  if (st && st.over) toast(`Budget ${st.category.name} superato: ${formatEuro(st.spent)} su ${formatEuro(st.budget)}`, { error: true, duration: 5000 });
+  const st = C.budgetStatus(state, period, ctx.today()).find((b) => b.category.id === mov.categoryId);
+  if (!st || !st.over) return;
+  const text = st.planned > 0
+    ? `Budget ${st.category.name} superato: ${formatEuro(st.spent)} spesi + ${formatEuro(st.planned)} programmati su ${formatEuro(st.budget)}`
+    : `Budget ${st.category.name} superato: ${formatEuro(st.spent)} su ${formatEuro(st.budget)}`;
+  toast(text, { error: true, duration: 5000 });
 }
 
 function needsTemplatesAccounts(ctx) {
@@ -998,6 +1003,50 @@ export function openEtfPriceSheet(ctx, etf) {
       return true;
     },
     content: (s) => { body = s.body; body.append(...build()); setTimeout(() => document.getElementById('p-price')?.focus(), 0); },
+  });
+}
+
+// Aggiorna valore di un conto crypto (v6, decisione v6 §2): valore in euro di 1 unità (es. 1 BTC), 2 decimali come
+// Compra/Vendi, con la data (oggi o un giorno passato). Annulla rimette i valori di prima.
+export function openCryptoPriceSheet(ctx, account) {
+  const { store } = ctx;
+  const today = ctx.today();
+  const d = { priceText: '', date: today };
+  const units = C.accountBalance(store.getState(), account.id);
+  const calcText = () => {
+    const p = parseEuroInput(d.priceText);
+    if (!p) return 'Scrivi il valore: il totale si calcola da solo.';
+    return `Valore totale: ${formatQty(units, account.asset)} × ${formatEuro(p)} = ${formatEuro(C.cryptoValue(units, { price: p }))}`;
+  };
+  const lastText = () => {
+    const a = store.find('account', account.id);
+    const same = (a.prices || []).find((x) => x.date === d.date);
+    if (same) return `Sostituisce il valore del ${formatDateIt(same.date)} (${formatEuro(same.price)})`;
+    const v = C.cryptoUnitValue(store.getState(), a);
+    if (!v) return 'Nessun valore ancora.';
+    return `Ultimo valore: ${formatEuro(v.price)} del ${formatDateIt(v.date)}${v.source === 'purchase' ? ' (prezzo d\'acquisto)' : ''}`;
+  };
+  const build = () => [
+    el('p', { class: 'section-footer', id: 'cp-head', text: `Conto: ${account.name} · ${formatQty(units, account.asset)}` }),
+    el('div', { class: 'form-group' },
+      field({ label: `Valore di 1 ${account.asset} (€)`, field: 'price', id: 'cp-price', hint: el('div', {}, el('p', { class: 'field__hint', text: 'Lo trovi nell\'app dell\'exchange o del wallet.' }), el('p', { class: 'field__hint calc', id: 'cp-calc', text: calcText() })),
+        input: input({ id: 'cp-price', value: d.priceText, inputmode: 'decimal', placeholder: '0,00', cls: 'input--amount', onInput: (v) => { d.priceText = v; const n = document.getElementById('cp-calc'); if (n) n.textContent = calcText(); } }) }),
+      field({ label: 'Data', field: 'date', id: 'cp-date', input: input({ id: 'cp-date', type: 'date', value: d.date, cls: 'input--date', attrs: { max: today }, onInput: (v) => { d.date = v; const n = document.getElementById('cp-last'); if (n) n.textContent = lastText(); } }) })),
+    el('p', { class: 'section-footer', id: 'cp-last', text: lastText() }),
+  ];
+  return sheet({
+    title: 'Aggiorna valore',
+    onSave: () => {
+      const price = parseEuroInput(d.priceText);
+      if (!price) throw new ValidationError(d.priceText.trim() ? 'Valore non valido (es. 70.000,00)' : 'Inserisci il valore', 'price');
+      if (!d.date) throw new ValidationError('Data non valida', 'date');
+      if (d.date > today) throw new ValidationError('La data non può essere nel futuro', 'date');
+      const before = (store.find('account', account.id).prices || []).slice();
+      store.setAccountPrice(account.id, d.date, price);
+      toast('Valore aggiornato', { undo: () => store.updateAccount(account.id, { prices: before }) });
+      return true;
+    },
+    content: (s) => { s.body.append(...build()); setTimeout(() => document.getElementById('cp-price')?.focus(), 0); },
   });
 }
 

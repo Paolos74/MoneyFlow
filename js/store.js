@@ -334,6 +334,9 @@ const VALIDATORS = {
       order: Number.isSafeInteger(input.order) ? input.order : 0,
       icon: cleanIcon(input.icon),
       deposit: cleanDeposit(input.deposit, kind),
+      // v6 (facoltativo, assente nei dati v1–v5): valori di 1 unità crypto scritti a mano ("Aggiorna valore"),
+      // [{ date, price }] con price in centesimi per 1 unità intera; null per i conti in euro.
+      prices: kind === 'crypto' ? cleanPrices(input.prices) : null,
     };
     if (kind === 'crypto') {
       const a = typeof input.asset === 'string' ? input.asset.trim().toUpperCase() : '';
@@ -343,6 +346,8 @@ const VALIDATORS = {
     if (prev && unitOf(prev) !== unitOf(rec)) {
       const used = state.movements.some((m) => !m.deleted && (m.accountId === prev.id || m.toAccountId === prev.id));
       if (used) fail('Il conto ha già dei movimenti: non puoi cambiare tipo o simbolo', 'kind');
+      // I valori scritti a mano sono di 1 unità del vecchio simbolo: con un simbolo nuovo non valgono più.
+      if (kind === 'crypto') rec.prices = [];
     }
     uniqueName(state.accounts, { ...rec, id: prev?.id });
     return rec;
@@ -826,6 +831,17 @@ export function createStore({ storage, now = () => Date.now(), uuid = () => cryp
     return update('investment', id, { prices });
   }
 
+  // "Aggiorna valore" di un conto crypto (v6): aggiunge o sostituisce il valore di 1 unità di quella data
+  // (centesimi per 1 unità intera, es. 1 BTC = 70.000,00 → 7000000).
+  function setAccountPrice(id, date, price) {
+    const acc = find('account', id);
+    if (!acc || acc.deleted || acc.kind !== 'crypto') fail('Conto crypto non trovato');
+    if (!isValidISO(date)) fail('Data non valida', 'date');
+    if (!Number.isSafeInteger(price) || price < 1) fail('Valore non valido (es. 70.000,00)', 'price');
+    const prices = [...(acc.prices || []).filter((p) => p.date !== date), { date, price }];
+    return update('account', id, { prices });
+  }
+
   function upsertDerived(records, { ensureCategory = false } = {}) {
     const next = cloneState(state);
     const keys = [];
@@ -956,7 +972,7 @@ export function createStore({ storage, now = () => Date.now(), uuid = () => cryp
     confirmAll: (id, dates) => confirmMany(id, dates.map((date) => ({ date }))),
     skipOccurrence: (id, date) => setHandled(id, date, 'saltato'),
     unhandleOccurrence: (id, date) => setHandled(id, date, null),
-    adjustGoal, allocateGoals, upsertDerived, addMovements, settlePerson, ensureDividendCategory, setInvestmentPrice,
+    adjustGoal, allocateGoals, upsertDerived, addMovements, settlePerson, ensureDividendCategory, setInvestmentPrice, setAccountPrice,
   };
   for (const kind of ['Account', 'Category', 'Movement', 'Scheduled', 'Goal', 'Investment']) {
     const k = kind.toLowerCase();

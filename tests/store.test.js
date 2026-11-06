@@ -198,6 +198,21 @@ for (const v of ['v2', 'v3', 'v4']) {
   });
 }
 
+test('fixture data-v5.json e investments-v5.json caricate identiche', () => {
+  const data = readFileSync(new URL('./fixtures/data-v5.json', import.meta.url), 'utf8');
+  const inv = readFileSync(new URL('./fixtures/investments-v5.json', import.meta.url), 'utf8');
+  const storage = memoryStorage({ [DATA_KEY]: data, [INVEST_KEY]: inv });
+  const store = createStore({ storage, now: clock(), uuid: seqUuid() });
+  assert.equal(store.corrupted, null);
+  const { investments, ...rest } = store.getState();
+  assert.deepEqual(rest, JSON.parse(data));
+  assert.deepEqual(investments, JSON.parse(inv).investments);
+  assert.equal(storage.getItem(DATA_KEY), data, 'il caricamento non riscrive i dati');
+  assert.equal(storage.getItem(INVEST_KEY), inv, 'il caricamento non riscrive gli ETF');
+  // v6: i conti della v5 non hanno `prices` e restano così finché non si modificano
+  assert.ok(store.getState().accounts.every((a) => !('prices' in a)));
+});
+
 test('applyRemote: vince updatedAt più recente e notifica come remote', () => {
   const { store, eur } = base();
   const events = [];

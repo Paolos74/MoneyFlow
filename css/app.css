@@ -788,3 +788,56 @@ a.meter.meter--cat, .meter--cat { display: flex; gap: 12px; align-items: center;
 @media (prefers-contrast: more) {
   .card.card--saved { border: 1px solid var(--separator); }
 }
+
+/* ---- Design v6 UX (proposte 1–10, approvate in prova): Home più leggera. Solo aspetto e disposizione. ---- */
+
+/* 1. Promemoria backup: una riga sotto Quanto ti resta, icona ambra, testo grigio, azione verde. */
+.notice-row { display: grid; grid-template-columns: 18px 1fr auto; gap: 8px; align-items: center; min-height: 48px; padding: 6px 16px; margin: 0 0 16px; background: var(--surface); border-radius: var(--radius); box-shadow: var(--shadow); text-decoration: none; color: var(--muted); }
+.notice-row:active { opacity: .6; }
+.notice-row__icon { display: grid; place-items: center; color: var(--amber); }
+.notice-row__text { font-size: 13px; line-height: 1.35; color: var(--muted); min-width: 0; }
+.notice-row__action { font-size: 13px; font-weight: 600; color: var(--accent); white-space: nowrap; display: inline-flex; align-items: center; gap: 2px; }
+
+/* 2. Scomposizione su una riga: tre colonne senza riquadro, filo sottile sopra. */
+.card--remaining .stats--line { flex-wrap: nowrap; gap: 8px; border-top: 0.5px solid var(--separator); padding-top: 10px; margin-top: 2px; }
+.card--remaining .stats--line .stat { flex: 1 1 0; min-width: 0; background: none; border-radius: 0; padding: 0; }
+.stats--line .stat__label { font-size: 13px; margin: 0 0 1px; }
+.stats--line .stat__value { font-size: 15px; overflow: hidden; text-overflow: ellipsis; }
+
+/* 4. Puoi spendere oggi compatto (solo Home): importo a destra a 22 px. */
+.today-box--compact { align-items: center; gap: 10px; padding: 10px 12px; margin: 10px 0 12px; }
+.card .today-box--compact .today-box__label { white-space: nowrap; }
+.today-box--compact .today-box__icon { width: 32px; height: 32px; }
+.card .today-box--compact .today-box__value { flex: none; font-size: 22px; margin: 0; }
+
+/* 5. Quanto metti da parte compatto: importo accanto al titolo, una riga grigia di dettaglio. */
+.card--saved-compact .card__head { margin-bottom: 6px; }
+.saved__head { display: inline-flex; align-items: center; gap: 4px; flex: none; }
+.card--saved-compact .saved__value { margin: 0; font-family: var(--font-num); font-size: 22px; line-height: 1.2; font-weight: 700; white-space: nowrap; font-variant-numeric: tabular-nums; color: var(--income); }
+.card--saved-compact .saved__value.is-neg { color: var(--text); }
+.card .saved__line { font-size: 14px; line-height: 1.45; color: var(--muted); margin: 0; }
+.card--saved-compact:active { opacity: .7; }
+
+/* 6. Da confermare in Home: una riga per voce, Conferma piccolo a destra (bersaglio 44 px). */
+.row--pending { padding: 0 16px 0 0; gap: 8px; }
+.row--pending .row__value { max-width: none; }
+/* Data e conto interi: il sottotitolo va a capo tra le parole invece di finire con i puntini (review U1, U2).
+   La riga si stringe sempre dentro la card (min-width: 0, review U3); break-word spezza solo una parola
+   più larga dell'intera colonna. Lo spazio dopo "14/11 ·" sta fuori dalla data (nowrap), così si va a capo
+   prima del conto invece di spezzarlo. Il titolo resta su una riga con "…". */
+.row--pending .row__sub { overflow: visible; overflow-wrap: break-word; }
+.row--pending .row__date { white-space: nowrap; }
+.row__hit { flex: 1; min-width: 0; display: flex; align-items: center; gap: 10px; min-height: 60px; padding: 8px 0 8px 16px; background: none; border: 0; text-align: left; color: inherit; font: inherit; }
+.row__hit:active { opacity: .6; }
+.row--pending .btn--small { flex: none; min-height: 44px; padding: 0 12px; }
+
+/* 7. Card Pagamenti programmati: etichetta "Da confermare (N)", "Vedi tutte" in fondo a destra. */
+.card .card__label { font-size: 13px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: .02em; margin: 0 0 2px; }
+.card__foot { display: flex; justify-content: flex-end; }
+.card__foot .card__link { min-height: 44px; padding: 10px 0 0 8px; }
+.advice--plain { margin-top: 0; border-top: 0; padding-top: 0; }
+button.advice__row { width: 100%; background: none; border: 0; font: inherit; text-align: left; }
+
+@media (prefers-contrast: more) {
+  .notice-row { border: 1px solid var(--separator); }
+}

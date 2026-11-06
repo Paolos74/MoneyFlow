@@ -3,7 +3,7 @@
 // e di ETF (v5), più il riepilogo delle tasse degli investimenti.
 
 import { el, card, list, row, section, segmented, emptyState, button, sheet, field, input, colorPicker, iconPicker, toggle, toast, icon, preserveFocus, clear } from '../ui.js';
-import { formatEuro, parseEuroInput, parseQtyInput, formatEuroPlain, formatQtyPlain, parsePercentInput, formatPercentBp, formatPercentSigned, formatRateBp } from '../money.js';
+import { formatEuro, formatQty, parseEuroInput, parseQtyInput, formatEuroPlain, formatQtyPlain, parsePercentInput, formatPercentBp, formatPercentSigned, formatRateBp } from '../money.js';
 import { formatDateIt } from '../dates.js';
 import { sortedInvestments, etfSummary, investTaxYear, qtyText } from '../invest.js';
 import { ValidationError } from '../errors.js';
@@ -25,25 +25,31 @@ const shortDate = (iso, today) => (iso.slice(0, 4) === today.slice(0, 4) ? forma
 
 // Totale del patrimonio in grande (decisione v4 n. 4), poi conti in euro, depositi, investimenti e crypto (solo quantità).
 // v5: il totale comprende gli ETF al valore scritto a mano (o al prezzo d'acquisto), con le date dei valori usati.
+// v6 (decisione v6 §2): anche le crypto con un valore (Aggiorna valore o prezzo d'acquisto); le quantità senza
+// valore in euro sono elencate a parte e non entrano nel totale.
 function renderAccounts(root, ctx, state) {
   const accounts = C.sortedAccounts(state);
   const nw = C.netWorth(state);
   const today = ctx.today();
   const etfs = sortedInvestments(state).map((e) => ({ etf: e, sum: etfSummary(state, e.id) }));
   const held = etfs.filter((x) => x.sum.qty > 0);
-  const dates = held.map((x) => x.sum.valueInfo.date).sort();
+  const dates = [...held.map((x) => x.sum.valueInfo.date), ...nw.cryptoValued.map((x) => x.info.date)].sort();
+  const parts = ['Conti in euro', 'depositi', held.length ? 'ETF' : null, nw.cryptoValued.length ? 'crypto' : null].filter(Boolean);
+  const partsText = parts.slice(0, -1).join(', ') + ' e ' + parts[parts.length - 1];
+  const unvalued = nw.cryptoUnvalued.map((c) => formatQty(c.units, c.asset)).join(' · ');
+  const valueOf = held.length && nw.cryptoValued.length ? 'Valore di ETF e crypto' : held.length ? 'Valore degli ETF' : 'Valore delle crypto';
   root.append(card({ title: 'Patrimonio totale', tint: 'butter', icon: 'cash', cls: 'card--networth' },
     el('p', { class: 'hero__value', id: 'conti-total', text: formatEuro(nw.totalCents) }),
-    el('p', { class: 'hero__sub', id: 'conti-total-sub', text: (held.length ? 'Conti in euro, depositi e ETF' : 'Conti in euro e depositi') + (nw.crypto.length ? ` · ${C.cryptoLine(nw)} senza valore in euro` : '') }),
-    held.length ? el('p', { class: 'hero__sub', id: 'conti-total-dates', text: dates[0] === dates[dates.length - 1] ? `Valore degli ETF al ${formatDateIt(dates[0])}` : `Valore degli ETF dal ${formatDateIt(dates[0])} al ${formatDateIt(dates[dates.length - 1])}` }) : null));
+    el('p', { class: 'hero__sub', id: 'conti-total-sub', text: partsText + (unvalued ? ` · ${unvalued} senza valore in euro` : '') }),
+    dates.length ? el('p', { class: 'hero__sub', id: 'conti-total-dates', text: dates[0] === dates[dates.length - 1] ? `${valueOf} al ${formatDateIt(dates[0])}` : `${valueOf} dal ${formatDateIt(dates[0])} al ${formatDateIt(dates[dates.length - 1])}` }) : null));
   if (!accounts.length) {
-    root.append(emptyState({ icon: 'wallet', title: 'Nessun conto', text: 'Aggiungi conti in euro (banca, contanti), depositi o crypto (solo quantità).',
+    root.append(emptyState({ icon: 'wallet', title: 'Nessun conto', text: 'Aggiungi conti in euro (banca, contanti), depositi o crypto (quantità e valore in euro scritto a mano).',
       action: button('Nuovo conto', () => openAccountForm(ctx), { kind: 'primary', id: 'conti-new-empty' }) }));
     return;
   }
   const bal = C.balances(state);
   const accRow = (a, subtitle) => row({
-    icon: C.accountIcon(a), color: a.color, title: a.name, subtitle,
+    icon: C.accountIcon(a), color: a.color, title: a.name, subtitle, cls: a.kind === 'crypto' ? 'row--wrapsub' : '',
     value: amountIn(state, a.id, bal.get(a.id) || 0), valueClass: (bal.get(a.id) || 0) < 0 ? 'is-danger' : '', href: `#conti/${a.id}`, attrs: { 'data-account': a.id },
   });
   const groups = [
@@ -52,17 +58,28 @@ function renderAccounts(root, ctx, state) {
       const r = [...a.deposit.rates].reverse().find((x) => x.from <= today) || a.deposit.rates[0];
       return `${formatPercentBp(r.rateBp)} lordo annuo`;
     }, 'conti-deposits'],
-    ['Crypto', accounts.filter((a) => a.kind === 'crypto'), (a) => a.asset, 'conti-crypto'],
+    ['Crypto', accounts.filter((a) => a.kind === 'crypto'), (a) => cryptoSubtitle(state, a, bal.get(a.id) || 0, today), 'conti-crypto'],
   ];
   for (const [title, list_, sub, id] of groups) {
     if (id === 'conti-crypto') renderInvestments(root, ctx, state, etfs, today);
     if (!list_.length) continue;
     const tot = list_.filter((a) => a.kind === 'eur').reduce((t, a) => t + (bal.get(a.id) || 0), 0);
-    root.append(section({ title, cls: id, action: list_[0].kind === 'eur' ? el('span', { class: 'is-muted', text: formatEuro(tot) }) : null }, list(...list_.map((a) => accRow(a, sub(a))))));
+    const action = list_[0].kind === 'eur' ? el('span', { class: 'is-muted', text: formatEuro(tot) })
+      : nw.cryptoCents > 0 ? el('span', { class: 'is-muted', id: 'conti-crypto-total', text: formatEuro(nw.cryptoCents) }) : null;
+    root.append(section({ title, cls: id, action }, list(...list_.map((a) => accRow(a, sub(a))))));
   }
   root.append(el('div', { class: 'btn-row' },
     accounts.length > 1 ? button('Trasferisci', () => openMovementForm(ctx, { preset: { type: 'trasferimento' } }), { icon: 'transfer', id: 'conti-transfer' }) : null,
     button('Nuovo conto', () => openAccountForm(ctx), { icon: 'plus', id: 'conti-new-bottom' })));
+}
+
+// Sottotitolo di un conto crypto (v6): simbolo e valore in euro con la data, oppure l'invito ad Aggiorna valore.
+// Il valore della riga resta la quantità.
+function cryptoSubtitle(state, a, units, today) {
+  const info = C.cryptoUnitValue(state, a);
+  if (!info) return units > 0 ? `${a.asset} · Senza valore in euro, Aggiorna valore` : a.asset;
+  if (units <= 0) return a.asset;
+  return `${a.asset} · ${formatEuro(C.cryptoValue(units, info))}, ${info.source === 'manual' ? 'valore al' : 'prezzo d\'acquisto del'} ${shortDate(info.date, today)}`;
 }
 
 // Sezione Investimenti (v5, design §6.3): una riga per ETF, poi "Nuovo ETF"; nota e riepilogo delle tasse sotto.

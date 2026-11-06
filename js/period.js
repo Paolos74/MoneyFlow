@@ -31,14 +31,21 @@ export function budgetPeriod(state, date, mode = 'calendar') {
   return { from: last, to, mode: 'salary', salaryDate: last, estimatedEnd: true };
 }
 
-// Quanto ti resta nel periodo (v5, decisione v5 §1):
-// - mode 'budget', se almeno una categoria di uscita non eliminata ha un budget:
-//   rimanente = somma dei budget − TUTTE le uscite contate del periodo (anche di categorie senza budget).
-//   spentTenths = uscite ÷ budget in decimi di punto; over = rimanente < 0 ("Hai sforato di …").
-//   Es. E1: budget Spesa 300,00 + Svago 200,00 = 500,00; uscite contate 120,00 + 80,00 + (50,00 − 10,00 esclusi)
-//   = 240,00 → resta 260,00 €, speso 48,0 %; con 10 giorni compreso oggi puoi spendere 26,00 € al giorno.
-// - mode 'cashflow', senza budget: come la v4, entrate contate − uscite contate − uscite programmate ancora da
-//   pagare nel periodo (anche quelle scadute e da confermare); entrate programmate non contate (prudenza).
+// Quanto ti resta nel periodo (v5, decisione v5 §1; v6, decisione v6 §1):
+// - planned = uscite programmate ancora da pagare nel periodo: occorrenze con data nel periodo non confermate né
+//   saltate (anche quelle scadute e "da confermare"), di qualunque categoria, anche senza budget. Entrate e
+//   trasferimenti programmati non contano. Un programmato confermato è già un'uscita e non è più da pagare.
+//   È lo stesso insieme nei due modi qui sotto.
+// - mode 'budget', se almeno una categoria di uscita non eliminata ha un budget (v6):
+//   rimanente = somma dei budget − TUTTE le uscite contate del periodo − planned.
+//   used = uscite + planned; spentTenths = used ÷ budget in decimi di punto; over = rimanente < 0 ("Hai sforato di …").
+//   Es. E1 (v5, nessun programmato): budget Spesa 300,00 + Svago 200,00 = 500,00; uscite contate 120,00 + 80,00 +
+//   (50,00 − 10,00 esclusi) = 240,00 → resta 260,00 €, speso 48,0 %; con 10 giorni puoi spendere 26,00 € al giorno.
+//   Es. E6 (v6): E1 + un programmato confermato da 10,00 (uscite 250,00) + programmati da pagare 60,00 (futuro) e
+//   15,00 (scaduto, da confermare) = 75,00 → resta 500,00 − 250,00 − 75,00 = 175,00 €, usato 325 ÷ 500 = 65,0 %,
+//   17,50 € al giorno per 10 giorni.
+// - mode 'cashflow', senza budget: come la v4, entrate contate − uscite contate − planned; entrate programmate non
+//   contate (prudenza).
 // In entrambi i modi restituzioni, trasferimenti (Compra/Vendi compresi) e variazioni non contano.
 // Puoi spendere oggi = rimanente / giorni da oggi alla fine del periodo compresi, per difetto al centesimo; 0 se ≤ 0
 // (es. 260,00 ÷ 7 giorni = 37,142… → 37,14 €).
@@ -51,10 +58,11 @@ export function remaining(state, period, today) {
   const perDayOf = (left) => (left > 0 ? Math.floor(left / daysLeft) : 0);
   const budget = state.categories.filter((c) => !c.deleted && c.type === 'uscita' && c.budget).reduce((s, c) => s + c.budget, 0);
   if (budget > 0) {
-    const left = budget - t.expense;
+    const used = t.expense + planned;
+    const left = budget - used;
     return {
-      mode: 'budget', budget, income: t.income, expense: t.expense, planned, left, daysLeft, perDay: perDayOf(left),
-      spentTenths: percentTenths(t.expense, budget), over: left < 0,
+      mode: 'budget', budget, income: t.income, expense: t.expense, planned, used, left, daysLeft, perDay: perDayOf(left),
+      spentTenths: percentTenths(used, budget), over: left < 0,
     };
   }
   const left = t.income - t.expense - planned;

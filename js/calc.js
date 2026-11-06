@@ -1,7 +1,7 @@
 // Calcoli puri su uno stato dello store: saldi, patrimonio, aggregati, crediti, obiettivi.
 // Le uscite contano al netto della quota esclusa; trasferimenti e restituzioni non sono entrate.
 
-import { formatEuro, formatEuroPlain, formatQty, percentTenths } from './money.js';
+import { formatEuro, formatEuroPlain, formatQty, percentTenths, tradeEuroCents } from './money.js';
 import { monthEnd, monthStart, monthOf, startOfIsoWeek, addDays, toISO, parseISO } from './dates.js';
 import { pendingOccurrences, occurrences, yearlyAmount, nextOccurrence } from './recurrence.js';
 import { etfOf, investValue } from './invest.js';
@@ -116,24 +116,69 @@ export function balances(state, upTo = null) {
   return map;
 }
 
-// Patrimonio: somma in euro dei soli conti in euro; le crypto restano come quantità (scelta provvisoria).
-// v5: investCents = valore degli ETF non eliminati a upTo (valore scritto a mano o prezzo d'acquisto, js/invest.js);
-// totalCents = eurCents + investCents (Patrimonio totale).
+// Valore di 1 unità di un conto crypto a una data D (null = tutto), decisione v6 §2:
+// l'ultimo "Aggiorna valore" del conto (`account.prices`, centesimi per 1 unità intera) con data ≤ D → source 'manual';
+// altrimenti il prezzo dell'ultima Compra crypto verso il conto con data ≤ D (ordine data, poi creazione) →
+// source 'purchase' ("prezzo d'acquisto"); altrimenti null (il conto resta fuori dal patrimonio).
+// Le Vendi non cambiano il valore unitario.
+export function cryptoUnitValue(state, account, date = null) {
+  const prices = (account.prices || []).filter((p) => !date || p.date <= date);
+  if (prices.length) { const p = prices[prices.length - 1]; return { price: p.price, date: p.date, source: 'manual' }; }
+  let last = null;
+  for (const m of state.movements) {
+    if (m.deleted || m.etfId || m.type !== 'trasferimento' || m.trade !== 'compra' || m.toAccountId !== account.id) continue;
+    if (date && m.date > date) continue;
+    if (!Number.isSafeInteger(m.price) || m.price < 1) continue;
+    if (!last || m.date > last.date || (m.date === last.date && (m.createdAt ?? 0) >= (last.createdAt ?? 0))) last = m;
+  }
+  return last ? { price: last.price, date: last.date, source: 'purchase' } : null;
+}
+
+// Valore in euro di un conto crypto: quantità × valore di 1 unità, al centesimo "metà in su" (tradeEuroCents);
+// 0 se la quantità è ≤ 0 o se non c'è valore.
+export function cryptoValue(units, info) {
+  return units > 0 && info ? tradeEuroCents(units, info.price) ?? 0 : 0;
+}
+
+// Patrimonio a upTo (null = tutto):
+// - eurCents = saldi dei conti in euro non eliminati;
+// - investCents (v5) = valore degli ETF non eliminati (valore scritto a mano o prezzo d'acquisto, js/invest.js);
+// - cryptoCents (v6, decisione v6 §2) = somma dei conti crypto non eliminati con un valore: quantità × valore di
+//   1 unità (cryptoUnitValue); i conti senza valore restano fuori e sono elencati in cryptoUnvalued;
+// - totalCents = eurCents + investCents + cryptoCents (Patrimonio totale);
+// - crypto = tutte le quantità per simbolo (come prima).
+// Es. E7: conto euro 1.080,00; 0,015 BTC con ultima Compra a 64.000,00 → 960,00 (prezzo d'acquisto), totale 2.040,00;
+// dopo "Aggiorna valore" a 70.000,00 → 0,015 × 70.000,00 = 1.050,00, totale 2.130,00.
 export function netWorth(state, upTo = null) {
   const bal = balances(state, upTo);
   let eurCents = 0;
+  let cryptoCents = 0;
   const crypto = new Map();
+  const cryptoValued = [];
+  const unvalued = new Map();
   for (const a of live(state.accounts)) {
     const b = bal.get(a.id) || 0;
-    if (a.kind === 'crypto') crypto.set(a.asset, (crypto.get(a.asset) || 0) + b);
-    else eurCents += b;
+    if (a.kind === 'crypto') {
+      crypto.set(a.asset, (crypto.get(a.asset) || 0) + b);
+      if (b <= 0) continue;
+      const info = cryptoUnitValue(state, a, upTo);
+      if (info) {
+        const cents = cryptoValue(b, info);
+        cryptoCents += cents;
+        cryptoValued.push({ accountId: a.id, asset: a.asset, units: b, cents, info });
+      } else unvalued.set(a.asset, (unvalued.get(a.asset) || 0) + b);
+    } else eurCents += b;
   }
   const investCents = investValue(state, upTo);
+  const byAsset = (x, y) => x.asset.localeCompare(y.asset);
   return {
     eurCents,
     investCents,
-    totalCents: eurCents + investCents,
-    crypto: [...crypto.entries()].map(([asset, units]) => ({ asset, units })).sort((a, b) => a.asset.localeCompare(b.asset)),
+    cryptoCents,
+    totalCents: eurCents + investCents + cryptoCents,
+    crypto: [...crypto.entries()].map(([asset, units]) => ({ asset, units })).sort(byAsset),
+    cryptoValued,
+    cryptoUnvalued: [...unvalued.entries()].map(([asset, units]) => ({ asset, units })).sort(byAsset),
   };
 }
 
@@ -142,7 +187,10 @@ export function cryptoLine(nw) {
 }
 
 export function netWorthSeries(state, months) {
-  return months.map((ym) => { const nw = netWorth(state, monthEnd(ym)); return { month: ym, eurCents: nw.eurCents, totalCents: nw.totalCents }; });
+  return months.map((ym) => {
+    const nw = netWorth(state, monthEnd(ym));
+    return { month: ym, eurCents: nw.eurCents, investCents: nw.investCents, cryptoCents: nw.cryptoCents, totalCents: nw.totalCents };
+  });
 }
 
 function inRange(m, from, to) {
@@ -207,16 +255,29 @@ export function budgetAdvice(state, period) {
 }
 
 // Budget per categoria: `range` è un mese 'YYYY-MM' oppure un periodo { from, to } (periodo dallo stipendio, v4).
-export function budgetStatus(state, range) {
+// v6 (decisione v6 §1, risposta 1B): con `today` conta anche le uscite programmate della categoria ancora da pagare
+// nel periodo (stesso insieme di "Quanto ti resta", plannedBetween): used = spent + planned, left = budget − used,
+// pct = used ÷ budget, over = used > budget. Senza `today` planned = 0 (comportamento v5).
+// Es. budget Bollette 100,00, speso 30,00, programmata 50,00 il 25 → used 80,00, restano 20,00; con un'altra
+// bolletta programmata da 30,00 → used 110,00, superato di 10,00.
+export function budgetStatus(state, range, today = null) {
   const from = typeof range === 'string' ? monthStart(range) : range.from;
   const to = typeof range === 'string' ? monthEnd(range) : range.to;
+  const plannedBy = new Map();
+  if (today) {
+    for (const p of plannedBetween(state, from, to, today)) {
+      if (p.sched.type === 'uscita') plannedBy.set(p.sched.categoryId, (plannedBy.get(p.sched.categoryId) || 0) + p.sched.amount);
+    }
+  }
   return live(state.categories)
     .filter((c) => c.type === 'uscita' && c.budget)
     .sort((a, b) => (a.order - b.order) || a.createdAt - b.createdAt)
     .map((c) => {
       let spent = 0;
       for (const m of state.movements) if (inRange(m, from, to) && m.type === 'uscita' && m.categoryId === c.id) spent += countedExpense(m);
-      return { category: c, budget: c.budget, spent, left: c.budget - spent, pct: percentTenths(spent, c.budget), over: spent > c.budget };
+      const planned = plannedBy.get(c.id) || 0;
+      const used = spent + planned;
+      return { category: c, budget: c.budget, spent, planned, used, left: c.budget - used, pct: percentTenths(used, c.budget), over: used > c.budget };
     });
 }
 
@@ -410,7 +471,8 @@ export function recentTemplates(state, n = 6) {
   const out = [];
   const seen = new Set();
   const ok = (list, id) => { const r = byId(list, id); return r && !r.deleted; };
-  const sorted = state.movements.filter((m) => !m.deleted && ['uscita', 'entrata', 'trasferimento'].includes(m.type))
+  // UX v6 proposta 10: senza i movimenti creati in automatico (interessi del conto deposito).
+  const sorted = state.movements.filter((m) => !m.deleted && !m.interest && ['uscita', 'entrata', 'trasferimento'].includes(m.type))
     .sort((a, b) => b.createdAt - a.createdAt);
   for (const m of sorted) {
     if (!ok(state.accounts, m.accountId)) continue;

@@ -2,6 +2,8 @@
 // quanto ti resta nel periodo e quanto puoi spendere oggi, budget per categoria, prime categorie di spesa.
 // Obiettivi: gli obiettivi di risparmio (prima erano nella scheda Conti).
 // v5: "Quanto ti resta" sul budget complessivo con colore progressivo, "Hai sforato di" e consiglio discreto.
+// v6: dal budget si tolgono anche i programmati da pagare (riga "Programmati da pagare"); le barre del Piano
+// contano speso + programmati della categoria ("di cui X programmati", risposta 1B).
 
 import { el, card, section, list, row, segmented, emptyState, button, progress, icon, iconBox, svgNode } from '../ui.js';
 import { ring } from '../charts.js';
@@ -35,7 +37,7 @@ function heroRing(r) {
   if (r.mode === 'budget') {
     // Parte del budget che resta: N% = rimanente × 100 ÷ budget, tra 0 e 100.
     const pct = over ? 0 : Math.max(0, Math.min(100, Math.round((r.left * 100) / r.budget)));
-    const spent = `Speso il ${formatPercent(r.spentTenths)} del budget`;
+    const spent = `${r.planned > 0 ? 'Speso e programmato' : 'Speso'} il ${formatPercent(r.spentTenths)} del budget`;
     return el('div', { class: 'remaining__ring' },
       svgNode(ring(over ? 1 : Math.max(0, r.left) / r.budget, { center: `${pct}%`, sub: 'resta', label: over ? `${spent}, sforato di ${formatEuro(-r.left)}` : spent })));
   }
@@ -45,7 +47,8 @@ function heroRing(r) {
     svgNode(ring(over ? 1 : r.left / r.income, { center: `${pct}%`, sub: 'resta', label: over ? `Sforato di ${formatEuro(-r.left)}` : `Resta il ${pct}% delle entrate del periodo` })));
 }
 
-export function remainingHero({ title, link, prefix, label, r, sub, todaySub: todayText = todaySub(r) }, ...rest) {
+// compactToday (solo Home, UX v6 proposta 4): riquadro basso con l'importo a destra.
+export function remainingHero({ title, link, prefix, label, r, sub, todaySub: todayText = todaySub(r), compactToday = false }, ...rest) {
   const budgetMode = r.mode === 'budget';
   const over = r.left < 0;
   let value;
@@ -70,12 +73,19 @@ export function remainingHero({ title, link, prefix, label, r, sub, todaySub: to
       value,
       sub ? el('p', { class: 'hero__sub', text: sub }) : null),
     heroRing(r)),
-    el('div', { class: 'today-box' },
-      el('span', { class: 'today-box__icon' }, icon('sun', 18)),
-      el('div', { class: 'today-box__text' },
-        el('p', { class: 'today-box__label', text: 'Puoi spendere oggi' }),
-        el('p', { class: 'today-box__value', id: `${prefix}-today`, text: formatEuro(r.perDay) }),
-        el('p', { class: 'today-box__sub', text: todayText }))),
+    compactToday
+      ? el('div', { class: 'today-box today-box--compact' },
+        el('span', { class: 'today-box__icon' }, icon('sun', 18)),
+        el('div', { class: 'today-box__text' },
+          el('p', { class: 'today-box__label', text: 'Puoi spendere oggi' }),
+          el('p', { class: 'today-box__sub', text: todayText })),
+        el('p', { class: 'today-box__value', id: `${prefix}-today`, text: formatEuro(r.perDay) }))
+      : el('div', { class: 'today-box' },
+        el('span', { class: 'today-box__icon' }, icon('sun', 18)),
+        el('div', { class: 'today-box__text' },
+          el('p', { class: 'today-box__label', text: 'Puoi spendere oggi' }),
+          el('p', { class: 'today-box__value', id: `${prefix}-today`, text: formatEuro(r.perDay) }),
+          el('p', { class: 'today-box__sub', text: todayText }))),
     ...rest);
 }
 
@@ -94,6 +104,19 @@ const moveLink = (p, categoryId) => `#movimenti?periodo=custom&da=${p.from}&a=${
 // "Crea un budget"; se la categoria è eliminata o sconosciuta "Scegli la categoria" verso Movimenti filtrati.
 // Seconda riga: uscite in "Altro" di uscita, "Scegli la categoria" verso Movimenti filtrati su Altro.
 export function budgetAdviceBlock(state, p, prefix) {
+  const rows = budgetAdviceRows(state, p, prefix);
+  return rows.length ? el('div', { class: 'advice' }, rows) : null;
+}
+
+// Home (UX v6 proposta 3): con due consigli una sola riga "2 suggerimenti sul budget" verso la scheda Budget,
+// dove restano interi; con un consiglio la riga intera.
+export function budgetAdviceHome(state, p) {
+  const rows = budgetAdviceRows(state, p, 'home');
+  if (rows.length < 2) return rows.length ? el('div', { class: 'advice' }, rows) : null;
+  return el('div', { class: 'advice' }, adviceRow({ id: 'home-advice-summary', href: '#budget', text: `${rows.length} suggerimenti sul budget`, action: 'Vedi' }));
+}
+
+function budgetAdviceRows(state, p, prefix) {
   const a = C.budgetAdvice(state, p);
   const rows = [];
   const first = a.unbudgeted[0];
@@ -110,7 +133,7 @@ export function budgetAdviceBlock(state, p, prefix) {
   if (a.other > 0) {
     rows.push(adviceRow({ id: `${prefix}-advice-other`, text: `${formatEuro(a.other)} in ${C.categoryLabel(state, C.OTHER_EXPENSE_ID)}`, action: 'Scegli la categoria', href: moveLink(p, C.OTHER_EXPENSE_ID) }));
   }
-  return rows.length ? el('div', { class: 'advice' }, rows) : null;
+  return rows;
 }
 
 // Invito in Home senza budget (design §4.3).
@@ -135,7 +158,7 @@ function renderBudget(root, ctx, state) {
   const p = budgetPeriod(state, today, ctx.prefs.get().budgetPeriod);
   const r = remaining(state, p, today);
 
-  // Rimanente. v5: con almeno un budget, budget complessivo meno tutte le uscite del periodo.
+  // Rimanente. v6: con almeno un budget, budget complessivo meno tutte le uscite e i programmati da pagare del periodo.
   const kv = (label, value, id, cls = '', rowCls = '') => el('div', { class: 'kv ' + rowCls }, el('span', { text: label }), el('span', { class: cls, id, text: value }));
   let table;
   if (r.mode === 'budget') {
@@ -144,6 +167,7 @@ function renderBudget(root, ctx, state) {
     table = el('div', { class: 'remaining__kv' },
       kv('Budget complessivo', formatEuro(r.budget), 'budget-total'),
       kv('Uscite del periodo', formatEuro(r.expense), 'budget-expense'),
+      kv('Programmati da pagare', formatEuro(r.planned), 'budget-planned'),
       unbudgeted > 0 ? kv('di cui senza budget', formatEuro(unbudgeted), 'budget-unbudgeted', '', 'kv--minus') : null);
   } else {
     table = el('div', { class: 'remaining__kv' },
@@ -155,7 +179,7 @@ function renderBudget(root, ctx, state) {
   root.append(remainingHero({
     title: 'Rimanente', prefix: 'budget', r, label: `Periodo: ${periodText(p)}`,
     link: el('a', { class: 'card__link', href: '#impostazioni/periodo', id: 'budget-period-link', text: 'Cambia periodo' }),
-    sub: r.mode === 'budget' ? `Budget complessivo meno tutte le uscite del periodo, fino al ${until}.` : `Ti restano ${formatEuro(r.left)} fino al ${until}.`,
+    sub: r.mode === 'budget' ? `Budget complessivo meno le uscite e i pagamenti programmati del periodo, fino al ${until}.` : `Ti restano ${formatEuro(r.left)} fino al ${until}.`,
     todaySub: todaySub(r),
   },
   table,
@@ -163,16 +187,16 @@ function renderBudget(root, ctx, state) {
   r.mode === 'budget' ? budgetAdviceBlock(state, p, 'budget') : null));
 
   // Piano: budget per categoria nel periodo
-  const budgets = C.budgetStatus(state, p);
+  const budgets = C.budgetStatus(state, p, today);
   root.append(section({ title: 'Piano', cls: 'section--t-amber', action: el('a', { href: '#impostazioni/budget', id: 'budget-edit', text: 'Modifica' }) },
     budgets.length
       ? card({ cls: 'plan' }, budgets.map((b) => el('a', { class: 'meter meter--cat' + (b.over ? ' is-over' : ''), href: `#movimenti?periodo=custom&da=${p.from}&a=${p.to}&categoria=${encodeURIComponent(b.category.id)}`, attrs: { 'data-budget': b.category.id, 'aria-label': `${b.category.name}: vedi i movimenti del periodo` } },
         iconBox(C.categoryIcon(state, b.category.id), b.category.color),
         el('div', { class: 'meter__body' },
           el('div', { class: 'meter__top' }, el('span', { class: 'meter__name', text: b.category.name }),
-            el('span', { text: `${formatEuro(b.spent)} / ${formatEuro(b.budget)}` })),
-          progress(b.spent / b.budget, { color: b.category.color, over: b.over }),
-          el('div', { class: 'meter__note', text: b.over ? `Superato di ${formatEuro(-b.left)}` : `Restano ${formatEuro(b.left)}` })))))
+            el('span', { text: `${formatEuro(b.used)} / ${formatEuro(b.budget)}` })),
+          progress(b.used / b.budget, { color: b.category.color, over: b.over }),
+          el('div', { class: 'meter__note', text: (b.over ? `Superato di ${formatEuro(-b.left)}` : `Restano ${formatEuro(b.left)}`) + (b.planned > 0 ? ` · di cui ${formatEuro(b.planned)} programmati` : '') })))))
       : list(row({ icon: 'gauge', color: 'var(--amber-fill)', title: 'Imposta i budget', subtitle: 'Quanto ti resta userà la somma dei budget', href: '#impostazioni/budget', id: 'budget-set' }))));
 
   // Andamento: prime 3 categorie di spesa del periodo

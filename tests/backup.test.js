@@ -66,6 +66,19 @@ for (const v of ['v2', 'v3', 'v4']) {
   });
 }
 
+test('la fixture v5 (dati ed ETF) si importa come backup, andata e ritorno identico', () => {
+  const data = JSON.parse(readFileSync(new URL('./fixtures/data-v5.json', import.meta.url), 'utf8'));
+  const inv = JSON.parse(readFileSync(new URL('./fixtures/investments-v5.json', import.meta.url), 'utf8'));
+  // backup v5 = dati più `investments` (come createBackup della v5)
+  const want = { ...data, investments: inv.investments };
+  const parsed = parseBackup(JSON.stringify({ ...want, exportedAt: '2026-03-01T10:00:00.000Z' }));
+  assert.deepEqual(parsed, want);
+  const store = createStore({ storage: memoryStorage(), now: clock(), uuid: seqUuid('z') });
+  store.replaceAll(parsed);
+  const back = parseBackup(JSON.stringify(createBackup(store.getState())));
+  assert.deepEqual(back, want);
+});
+
 test('nome del file di backup', () => {
   assert.match(backupFileName(new Date(2025, 2, 7, 10).getTime()), /^MoneyFlow_backup_2025-03-07\.json$/);
 });

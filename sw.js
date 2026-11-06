@@ -1,7 +1,7 @@
 // Service worker di MoneyFlow: cache dei file dell'app, offline, aggiornamento solo su richiesta.
 // AUMENTARE VERSION A OGNI RILASCIO e tenere ASSETS uguale ai file pubblicati.
 
-const VERSION = 'moneyflow-v5';
+const VERSION = 'moneyflow-v6';
 const ASSETS = [
   './',
   'index.html',

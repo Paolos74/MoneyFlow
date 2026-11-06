@@ -1,6 +1,7 @@
 // Dettaglio di un conto: saldo, movimenti per giorno, modifica, trasferimento,
 // Compra/Vendi e variazione quantità (crypto), elimina conto lasciando i movimenti (D6).
 // v4: per un deposito senza vincoli la card Interessi, "Cambia tasso da una data" e "Allinea al saldo reale".
+// v6: conto crypto con il valore in euro (Aggiorna valore o prezzo d'acquisto) e il pulsante Aggiorna valore.
 
 import { el, card, button, emptyState, confirmDialog, toast, attempt, list, sheet, field, input } from '../ui.js';
 import { formatEuro, formatPercentBp, parsePercentInput, parseEuroInput } from '../money.js';
@@ -8,7 +9,7 @@ import { formatDateIt, monthOf } from '../dates.js';
 import { ValidationError } from '../errors.js';
 import { alignId, reconcileInterest } from '../interest.js';
 import * as C from '../calc.js';
-import { openMovementForm, openTradeForm } from './movimento-form.js';
+import { openMovementForm, openTradeForm, openCryptoPriceSheet } from './movimento-form.js';
 import { openAccountForm } from './conti.js';
 import { dayGroups, amountIn } from './parts.js';
 
@@ -26,7 +27,8 @@ export function render(root, ctx) {
   const bal = C.accountBalance(state, a.id);
   root.append(card({ title: a.kind === 'crypto' ? `Quantità · ${a.asset}` : 'Saldo', icon: C.accountIcon(a), color: a.color },
     el('p', { class: `hero__value ${bal < 0 ? 'is-danger' : ''}`, id: 'acc-balance', text: amountIn(state, a.id, bal) }),
-    el('p', { class: 'hero__sub', text: `Saldo iniziale ${amountIn(state, a.id, a.initial)}${a.kind === 'crypto' ? ' · nessun prezzo in euro' : ''}` })));
+    el('p', { class: 'hero__sub', text: `Saldo iniziale ${amountIn(state, a.id, a.initial)}` }),
+    a.kind === 'crypto' ? el('p', { class: 'hero__sub', id: 'acc-value', text: cryptoValueText(state, a, bal) }) : null));
   if (a.kind === 'eur' && a.deposit) root.append(interestCard(ctx, a));
   const actions = [];
   if (a.kind === 'eur') {
@@ -38,6 +40,7 @@ export function render(root, ctx) {
       actions.push(button('Compra', () => openTradeForm(ctx, { side: 'compra', cryptoAccountId: a.id }), { kind: 'gold', icon: 'down', small: true, id: 'acc-buy' }));
       actions.push(button('Vendi', () => openTradeForm(ctx, { side: 'vendi', cryptoAccountId: a.id }), { kind: 'gold-soft', icon: 'up', small: true, id: 'acc-sell' }));
     }
+    actions.push(button('Aggiorna valore', () => openCryptoPriceSheet(ctx, a), { icon: 'edit', small: true, id: 'acc-price' }));
     actions.push(button('Variazione quantità', () => openMovementForm(ctx, { preset: { type: 'variazione', accountId: a.id } }), { icon: 'coin', small: true, id: 'acc-var' }));
   }
   if (C.sortedAccounts(state).length > 1) actions.push(button('Trasferisci', () => openMovementForm(ctx, { preset: { type: 'trasferimento', accountId: a.id } }), { icon: 'transfer', small: true, id: 'acc-transfer' }));
@@ -59,6 +62,15 @@ export function render(root, ctx) {
       toast('Conto eliminato', { undo: () => ctx.store.restoreAccount(a.id) });
     }
   } } }))));
+}
+
+// Valore in euro di un conto crypto (decisione v6 §2): quantità × valore di 1 unità, con la data del valore.
+// Senza valore (nessuna Compra e nessun Aggiorna valore) invita ad Aggiorna valore.
+function cryptoValueText(state, a, units) {
+  const info = C.cryptoUnitValue(state, a);
+  if (!info) return units > 0 ? 'Nessun valore in euro: tocca Aggiorna valore' : 'Nessun valore in euro';
+  const when = info.source === 'manual' ? `al ${formatDateIt(info.date)}` : `prezzo d'acquisto del ${formatDateIt(info.date)}`;
+  return `Valore ${formatEuro(C.cryptoValue(units, info))} · 1 ${a.asset} = ${formatEuro(info.price)} ${info.source === 'manual' ? when : `(${when})`}`;
 }
 
 // Card "Interessi": tasso attuale, netti del mese e dell'anno, ritenuta stimata dell'anno.

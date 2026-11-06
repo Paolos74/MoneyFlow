@@ -252,8 +252,13 @@ for (const v of ['v2', 'v3']) {
     const s = store.getState();
     const id = (n) => `${v}-${String(n).padStart(4, '0')}`;
     assert.deepEqual([...C.balances(s)], [[id(1), 533151], [id(2), 11700], [id(3), 800], [id(4), 1649000]]);
-    // v5: in più investCents (nessun ETF) e totalCents, uguale al totale in euro della v3.
-    assert.deepEqual(C.netWorth(s), { eurCents: 544851, investCents: 0, totalCents: 544851, crypto: [{ asset: 'BTC', units: 1649000 }] });
+    // v5: in più investCents (nessun ETF). v6 (decisione v6 §2): le crypto con una Compra entrano nel totale.
+    // 0,01649 BTC × ultima Compra 80.000,00 (16/02/2026) = 1.319,20 €; totale 5.448,51 + 1.319,20 = 6.767,71 €.
+    const nw = C.netWorth(s);
+    assert.deepEqual([nw.eurCents, nw.investCents, nw.cryptoCents, nw.totalCents], [544851, 0, 131920, 676771]);
+    assert.deepEqual(nw.crypto, [{ asset: 'BTC', units: 1649000 }]);
+    assert.deepEqual(nw.cryptoValued.map((x) => [x.accountId, x.units, x.cents, x.info.price, x.info.date, x.info.source]), [[id(4), 1649000, 131920, 8000000, '2026-02-16', 'purchase']]);
+    assert.deepEqual(nw.cryptoUnvalued, []);
     assert.deepEqual(C.totals(s, '2026-02-01', '2026-02-28'), { income: 205000, expense: 11550, net: 193450, rate: 944 });
     const oc = C.openCredits(s);
     assert.equal(oc.total, 3500);
@@ -269,7 +274,11 @@ test('fixture v4: saldi, patrimonio, totali e crediti come nella v4', () => {
   const raw = readFileSync(new URL('./fixtures/data-v4.json', import.meta.url), 'utf8');
   const s = createStore({ storage: memoryStorage({ 'moneyflow:data': raw }), now: clock(), uuid: seqUuid() }).getState();
   assert.deepEqual([...C.balances(s)], [['v4-0001', 423701], ['v4-0002', 6750], ['v4-0003', 100504], ['v4-0004', 1800000], ['v4-0005', 0]]);
-  assert.deepEqual(C.netWorth(s), { eurCents: 530955, investCents: 0, totalCents: 530955, crypto: [{ asset: 'BTC', units: 1800000 }] });
+  // v6: 0,018 BTC × Compra 60.000,00 del 12/02/2026 = 1.080,00 €; totale 5.309,55 + 1.080,00 = 6.389,55 €.
+  const nw = C.netWorth(s);
+  assert.deepEqual([nw.eurCents, nw.investCents, nw.cryptoCents, nw.totalCents], [530955, 0, 108000, 638955]);
+  assert.deepEqual(nw.crypto, [{ asset: 'BTC', units: 1800000 }]);
+  assert.deepEqual(nw.cryptoValued.map((x) => [x.info.price, x.info.date, x.info.source]), [[6000000, '2026-02-12', 'purchase']]);
   assert.deepEqual(C.totals(s, '2026-02-01', '2026-02-28'), { income: 205121, expense: 12750, net: 192371, rate: 938 });
   assert.equal(C.openCredits(s).total, 3000);
 });
@@ -332,4 +341,154 @@ test('v4 icone predefinite di categorie e conti', () => {
   assert.equal(C.accountIcon({ kind: 'crypto' }), 'coin');
   assert.equal(C.accountIcon({ kind: 'eur', deposit: { start: '2026-01-01' } }), 'vault');
   assert.equal(C.accountIcon({ kind: 'eur', icon: 'piggy' }), 'piggy');
+});
+
+// ---- v5: fixture generata con lo store v5 pubblicato (5367ec2) ----
+// Valori calcolati dal codice v5 sulla fixture: saldi, totale in euro, ETF e totali non cambiano in v6.
+const loadV5 = () => createStore({ storage: memoryStorage({
+  'moneyflow:data': readFileSync(new URL('./fixtures/data-v5.json', import.meta.url), 'utf8'),
+  'moneyflow:investments': readFileSync(new URL('./fixtures/investments-v5.json', import.meta.url), 'utf8'),
+}), now: clock(), uuid: seqUuid() });
+
+test('fixture v5: saldi, patrimonio in euro, ETF, totali e crediti come nella v5', () => {
+  const s = loadV5().getState();
+  assert.deepEqual([...C.balances(s)], [['v5-0001', 209451], ['v5-0002', 3790], ['v5-0003', 50101], ['v5-0004', 800000]]);
+  const nw = C.netWorth(s);
+  assert.deepEqual([nw.eurCents, nw.investCents], [263342, 33600]);
+  assert.deepEqual(nw.crypto, [{ asset: 'BTC', units: 800000 }]);
+  assert.deepEqual(C.totals(s, '2026-02-01', '2026-02-28'), { income: 1557, expense: 16750, net: -15193, rate: -9758 });
+  assert.equal(C.openCredits(s).total, 2000);
+});
+
+test('v6 fixture v1: BTC senza Compra resta fuori dal totale', () => {
+  const raw = readFileSync(new URL('./fixtures/data-v1.json', import.meta.url), 'utf8');
+  const s = createStore({ storage: memoryStorage({ 'moneyflow:data': raw }), now: clock(), uuid: seqUuid() }).getState();
+  const nw = C.netWorth(s);
+  assert.deepEqual([nw.eurCents, nw.cryptoCents, nw.totalCents], [260061, 0, 260061]);
+  assert.deepEqual(nw.cryptoUnvalued, [{ asset: 'BTC', units: 2708500 }]);
+});
+
+test('v6 fixture v5: patrimonio v5 2.969,42 + 0,008 BTC × Compra 60.000,00 = 480,00 → 3.449,42 €', () => {
+  const nw = C.netWorth(loadV5().getState());
+  // v5: totalCents 296942 (263342 + 33600); v6: + tradeEuroCents(800000, 6000000) = 48000
+  assert.deepEqual([nw.cryptoCents, nw.totalCents], [48000, 344942]);
+  assert.deepEqual(nw.cryptoValued.map((x) => [x.info.price, x.info.date, x.info.source]), [[6000000, '2026-02-05', 'purchase']]);
+});
+
+// ---- v6: crypto nel patrimonio con il valore scritto a mano (decisione v6 §2), esempi fatti a mano ----
+// E7: "Conto principale" 2.000,00; "Wallet prova" BTC da 0. Compra 03/11 0,01 BTC a 60.000,00 = 600,00;
+// Compra 10/11 0,005 BTC a 64.000,00 = 320,00. Conto euro 2.000,00 − 600,00 − 320,00 = 1.080,00.
+function e7() {
+  const now = clock();
+  const store = createStore({ storage: memoryStorage(), now, uuid: seqUuid() });
+  const eur = store.addAccount({ name: 'Conto principale', kind: 'eur', initial: 200000, color: PALETTE[1] });
+  const btc = store.addAccount({ name: 'Wallet prova', kind: 'crypto', asset: 'BTC', initial: 0, color: PALETTE[3] });
+  now.advance(10);
+  store.addMovement({ type: 'trasferimento', trade: 'compra', date: '2026-11-03', amount: 60000, amountTo: 1000000, price: 6000000, accountId: eur.id, toAccountId: btc.id });
+  now.advance(10);
+  store.addMovement({ type: 'trasferimento', trade: 'compra', date: '2026-11-10', amount: 32000, amountTo: 500000, price: 6400000, accountId: eur.id, toAccountId: btc.id });
+  return { store, now, eur, btc };
+}
+
+test('v6 E7: prima di Aggiorna valore 0,015 BTC × 64.000,00 = 960,00 (prezzo d\'acquisto), totale 2.040,00', () => {
+  const { store, btc } = e7();
+  const s = store.getState();
+  assert.deepEqual(C.cryptoUnitValue(s, store.find('account', btc.id)), { price: 6400000, date: '2026-11-10', source: 'purchase' });
+  const nw = C.netWorth(s);
+  assert.deepEqual([nw.eurCents, nw.cryptoCents, nw.totalCents], [108000, 96000, 204000]);
+  assert.deepEqual(nw.cryptoUnvalued, []);
+  // al 05/11: 0,01 BTC × 60.000,00 = 600,00; conto euro 2.000,00 − 600,00 = 1.400,00
+  const at5 = C.netWorth(s, '2026-11-05');
+  assert.deepEqual([at5.eurCents, at5.cryptoCents, at5.totalCents], [140000, 60000, 200000]);
+});
+
+test('v6 E7: Aggiorna valore 70.000,00 → 1.050,00, totale 2.130,00; stessa data sostituita, Annulla', () => {
+  const { store, btc } = e7();
+  store.setAccountPrice(btc.id, '2026-11-20', 7000000);
+  let s = store.getState();
+  assert.deepEqual(C.cryptoUnitValue(s, store.find('account', btc.id)), { price: 7000000, date: '2026-11-20', source: 'manual' });
+  let nw = C.netWorth(s);
+  assert.deepEqual([nw.cryptoCents, nw.totalCents], [105000, 213000]);
+  // al 15/11 il valore scritto il 20/11 non c'è ancora: prezzo d'acquisto, 960,00
+  assert.equal(C.netWorth(s, '2026-11-15').cryptoCents, 96000);
+  assert.deepEqual(C.netWorthSeries(s, ['2026-10', '2026-11']).map((p) => [p.cryptoCents, p.totalCents]), [[0, 200000], [105000, 213000]]);
+  // stessa data con 71.000,00: una sola voce
+  const before = store.find('account', btc.id).prices.slice();
+  store.setAccountPrice(btc.id, '2026-11-20', 7100000);
+  assert.deepEqual(store.find('account', btc.id).prices, [{ date: '2026-11-20', price: 7100000 }]);
+  assert.equal(C.netWorth(store.getState()).cryptoCents, 106500); // 0,015 × 71.000,00
+  // Annulla del toast: rimette i valori di prima
+  store.updateAccount(btc.id, { prices: before });
+  s = store.getState();
+  nw = C.netWorth(s);
+  assert.deepEqual([nw.cryptoCents, nw.totalCents], [105000, 213000]);
+});
+
+test('v6 E7: la quantità resta la grandezza principale: −0,001 BTC → 0,014 × 70.000,00 = 980,00, totale 2.060,00', () => {
+  const { store, btc } = e7();
+  store.setAccountPrice(btc.id, '2026-11-20', 7000000);
+  store.addMovement({ type: 'variazione', date: '2026-11-21', amount: -100000, accountId: btc.id });
+  const nw = C.netWorth(store.getState());
+  assert.deepEqual([nw.eurCents, nw.cryptoCents, nw.totalCents], [108000, 98000, 206000]);
+  assert.deepEqual(nw.crypto, [{ asset: 'BTC', units: 1400000 }]);
+});
+
+test('v6 Vendi crypto non cambia il valore unitario; valore con l\'ultima Compra per data', () => {
+  const { store, eur, btc } = e7();
+  store.addMovement({ type: 'trasferimento', trade: 'vendi', date: '2026-11-12', amount: 500000, amountTo: 40000, price: 8000000, accountId: btc.id, toAccountId: eur.id });
+  const s = store.getState();
+  assert.deepEqual(C.cryptoUnitValue(s, store.find('account', btc.id)), { price: 6400000, date: '2026-11-10', source: 'purchase' });
+  assert.equal(C.netWorth(s).cryptoCents, 64000); // 0,01 × 64.000,00
+});
+
+test('v6 E8: conto ETH senza Compra fuori dal patrimonio, poi Aggiorna valore 3.000,00 → 0,5 × 3.000,00 = 1.500,00', () => {
+  const { store } = world();
+  const eth = store.addAccount({ name: 'Wallet ETH', kind: 'crypto', asset: 'ETH', initial: 50000000, color: PALETTE[4] });
+  let s = store.getState();
+  assert.equal(C.cryptoUnitValue(s, store.find('account', eth.id)), null);
+  let nw = C.netWorth(s);
+  assert.deepEqual([nw.cryptoCents, nw.totalCents], [0, 10000]);
+  assert.deepEqual(nw.cryptoUnvalued, [{ asset: 'ETH', units: 50000000 }]);
+  store.setAccountPrice(eth.id, '2026-11-20', 300000);
+  s = store.getState();
+  nw = C.netWorth(s);
+  assert.deepEqual([nw.cryptoCents, nw.totalCents], [150000, 160000]);
+  assert.deepEqual(nw.cryptoUnvalued, []);
+  // conto eliminato: fuori dal patrimonio
+  store.deleteAccount(eth.id);
+  nw = C.netWorth(store.getState());
+  assert.deepEqual([nw.cryptoCents, nw.totalCents, nw.crypto.length], [0, 10000, 0]);
+});
+
+test('v6 setAccountPrice: solo conti crypto, valore e data validi; Modifica conserva prices', () => {
+  const { store, eur } = world();
+  assert.equal(store.find('account', eur.id).prices, null);
+  assert.throws(() => store.setAccountPrice(eur.id, '2026-11-20', 100), (e) => e.name === 'ValidationError' && /crypto/.test(e.message));
+  const btc = store.addAccount({ name: 'Wallet prova', kind: 'crypto', asset: 'BTC', initial: 100000, color: PALETTE[3] });
+  assert.deepEqual(store.find('account', btc.id).prices, []);
+  assert.throws(() => store.setAccountPrice(btc.id, '2026-11-20', 0), /Valore non valido/);
+  assert.throws(() => store.setAccountPrice(btc.id, '20/11/2026', 100), /Data non valida/);
+  store.setAccountPrice(btc.id, '2026-11-20', 7000000);
+  store.updateAccount(btc.id, { name: 'Wallet rinominato' });
+  assert.deepEqual(store.find('account', btc.id).prices, [{ date: '2026-11-20', price: 7000000 }]);
+});
+
+test('v6 cambio di simbolo senza movimenti: i valori del vecchio simbolo si azzerano', () => {
+  const { store } = world();
+  // saldo iniziale 0,5 BTC, Aggiorna valore 70.000,00 → 35.000,00 € nel patrimonio
+  const acc = store.addAccount({ name: 'Wallet cambio', kind: 'crypto', asset: 'BTC', initial: 50000000, color: PALETTE[3] });
+  store.setAccountPrice(acc.id, '2026-11-20', 7000000);
+  assert.equal(C.netWorth(store.getState()).cryptoCents, 3500000);
+  // stesso simbolo (anche scritto in minuscolo): i valori restano
+  store.updateAccount(acc.id, { asset: 'btc' });
+  assert.deepEqual(store.find('account', acc.id).prices, [{ date: '2026-11-20', price: 7000000 }]);
+  // simbolo ETH: il valore BTC non vale più, 0,5 ETH resta fuori dal patrimonio finché non si aggiorna
+  store.updateAccount(acc.id, { asset: 'ETH' });
+  assert.deepEqual(store.find('account', acc.id).prices, []);
+  const nw = C.netWorth(store.getState());
+  assert.deepEqual([nw.cryptoCents, nw.totalCents], [0, 10000]);
+  assert.deepEqual(nw.cryptoUnvalued, [{ asset: 'ETH', units: 50000000 }]);
+  // diventa conto in euro: prices null
+  store.updateAccount(acc.id, { kind: 'eur' });
+  assert.equal(store.find('account', acc.id).prices, null);
 });
