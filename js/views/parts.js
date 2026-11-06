@@ -1,5 +1,5 @@
 // Pezzi di interfaccia condivisi tra le viste: righe dei movimenti, gruppi per giorno,
-// programmati da confermare, selettore del periodo.
+// programmati da confermare, selettore del periodo, riga di azioni sotto il titolo (v7).
 
 import { el, row, section, list, chips, field, input, icon, button, actionSheet } from '../ui.js';
 import { formatEuro, formatEuroSigned, formatQty, formatPrice4 } from '../money.js';
@@ -13,6 +13,11 @@ const TYPE_ICON = { uscita: 'tag', entrata: 'down', trasferimento: 'transfer', r
 const TYPE_LABEL = { uscita: 'Uscita', entrata: 'Entrata', trasferimento: 'Trasferimento', restituzione: 'Restituzione', variazione: 'Variazione quantità' };
 
 const accountOf = (state, id) => state.accounts.find((a) => a.id === id) || null;
+
+// v7 (design §1.3): riga di azioni sotto il titolo grande delle schede, pulsanti a pillola allineati a sinistra.
+export function titleActions(...buttons) {
+  return el('div', { class: 'btn-row title-actions' }, ...buttons);
+}
 
 export function amountIn(state, accountId, v) {
   const a = accountOf(state, accountId);

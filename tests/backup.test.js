@@ -66,9 +66,9 @@ for (const v of ['v2', 'v3', 'v4']) {
   });
 }
 
-test('la fixture v5 (dati ed ETF) si importa come backup, andata e ritorno identico', () => {
-  const data = JSON.parse(readFileSync(new URL('./fixtures/data-v5.json', import.meta.url), 'utf8'));
-  const inv = JSON.parse(readFileSync(new URL('./fixtures/investments-v5.json', import.meta.url), 'utf8'));
+for (const v of ['v5', 'v6']) test(`la fixture ${v} (dati ed ETF) si importa come backup, andata e ritorno identico`, () => {
+  const data = JSON.parse(readFileSync(new URL(`./fixtures/data-${v}.json`, import.meta.url), 'utf8'));
+  const inv = JSON.parse(readFileSync(new URL(`./fixtures/investments-${v}.json`, import.meta.url), 'utf8'));
   // backup v5 = dati più `investments` (come createBackup della v5)
   const want = { ...data, investments: inv.investments };
   const parsed = parseBackup(JSON.stringify({ ...want, exportedAt: '2026-03-01T10:00:00.000Z' }));

@@ -1,4 +1,4 @@
-// Rotte di MoneyFlow (v4, v5: #investimenti/<id>), funzione pura: percorso e query dell'hash → vista e scheda, oppure reindirizzamento.
+// Rotte di MoneyFlow (v4, v5: #investimenti/<id>, v7: #impostazioni/budget → #budget), funzione pura: percorso e query dell'hash → vista e scheda, oppure reindirizzamento.
 // Schede: home, movimenti, budget, statistiche, conti. Le rotte vecchie si reindirizzano con la query conservata.
 
 const withQuery = (target, query = {}) => {
@@ -30,8 +30,11 @@ export function resolveRoute(path = [], query = {}) {
       return b ? { name: 'investimento', tab: 'conti' } : { redirect: 'conti' };
     case 'obiettivi':
       return b ? { name: 'obiettivo', tab: 'budget' } : { redirect: withQuery('budget/obiettivi', query) };
+    // v7: i budget si gestiscono solo nella scheda Budget; la vecchia pagina Impostazioni → Budget porta lì.
+    // La scheda accesa nelle Impostazioni la decide app.js (quella da cui si è toccato ⚙︎, altrimenti Home).
     case 'impostazioni':
       if (b === 'fondo-pensione') return { redirect: withQuery('statistiche/fondo-pensione', query) };
+      if (b === 'budget') return { redirect: withQuery('budget', query) };
       return { name: 'impostazioni', tab: 'home' };
     default: return { redirect: 'home' };
   }

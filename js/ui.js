@@ -1,5 +1,5 @@
-// Helper DOM di MoneyFlow: el(), icone, fogli dal basso, avvisi, toast con Annulla,
-// liste, chip, segmentato, campi, condivisione/download. Testo dell'utente solo con textContent.
+// Helper DOM di MoneyFlow: el(), icone, fogli dal basso (v7: impilabili e chiudibili trascinandoli giù), avvisi,
+// toast con Annulla, liste, chip, segmentato, campi, condivisione/download. Testo dell'utente solo con textContent.
 
 import { iconSvg, PICK_ICONS, PICK_ICON_LABELS } from './icons.js';
 import { ValidationError, StorageError } from './errors.js';
@@ -228,27 +228,131 @@ export function showFormError(root, err) {
 const sheetRoot = () => document.getElementById('sheet-root');
 let openSheets = 0;
 
+// Livelli aperti (fogli, avvisi, fogli d'azione), dal basso in alto: Esc chiude solo quello in cima (v7).
+const layers = [];
+function onLayerKey(e) {
+  if (e.key !== 'Escape' || !layers.length) return;
+  e.stopPropagation();
+  layers[layers.length - 1]();
+}
 function trapEscape(onEsc) {
-  const h = (e) => { if (e.key === 'Escape') { e.stopPropagation(); onEsc(); } };
-  document.addEventListener('keydown', h, true);
-  return () => document.removeEventListener('keydown', h, true);
+  if (!layers.length) document.addEventListener('keydown', onLayerKey, true);
+  layers.push(onEsc);
+  return () => {
+    const i = layers.lastIndexOf(onEsc);
+    if (i >= 0) layers.splice(i, 1);
+    if (!layers.length) document.removeEventListener('keydown', onLayerKey, true);
+  };
+}
+
+// Fogli impilati (v7): ogni foglio aperto sopra un altro ha velo e foglio più in alto (z-index per livello).
+const sheetStack = [];
+const reducedMotion = () => matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+// Gesto di chiusura (decisione v7 §5, design §5.2), con Pointer Events di tocco e penna (il mouse no):
+// - dalla maniglia e dall'intestazione sempre, dopo 8 px verso il basso (sotto è un tocco: Annulla/Salva restano
+//   cliccabili);
+// - dal corpo solo se all'inizio del gesto è scrollato in cima e il dito va verso il basso; mai da campi, select,
+//   cursori o file di chip/recenti che scorrono di lato. Verso l'alto lo scroll interno resta nativo.
+// Il foglio segue il dito (translateY ≥ 0), il velo sfuma; al rilascio chiude oltre il 25 % dell'altezza (almeno
+// 120 px) o con una velocità verso il basso > 0,5 px/ms negli ultimi 100 ms, altrimenti torna su.
+const DRAG_START = 8;
+const NO_DRAG = 'input, textarea, select, [contenteditable], .chips, .recents, [data-no-drag]';
+function attachDrag(node, backdrop, body, head, requestClose) {
+  let g = null;
+  let suppressClick = false;
+  const set = (dy, animate) => {
+    node.style.transition = animate && !reducedMotion() ? 'transform .25s cubic-bezier(.2,.9,.3,1)' : 'none';
+    backdrop.style.transition = node.style.transition.replace('transform', 'opacity');
+    node.style.transform = dy ? `translateY(${dy}px)` : '';
+    backdrop.style.opacity = dy ? String(Math.max(0, 1 - dy / Math.max(1, node.offsetHeight))) : '';
+  };
+  const reset = () => set(0, true);
+  const down = (e) => {
+    if (g || (e.pointerType !== 'touch' && e.pointerType !== 'pen') || e.button > 0) return;
+    const fromHead = head.contains(e.target) || e.target.classList?.contains('sheet__grabber');
+    if (!fromHead) {
+      if (!body.contains(e.target) || e.target.closest(NO_DRAG) || body.scrollTop > 0) return;
+    }
+    g = { id: e.pointerId, y0: e.clientY, x0: e.clientX, fromHead, active: false, samples: [{ t: e.timeStamp, y: e.clientY }] };
+  };
+  const move = (e) => {
+    if (!g || e.pointerId !== g.id) return;
+    const dy = e.clientY - g.y0;
+    const dx = e.clientX - g.x0;
+    if (!g.active) {
+      // Dal corpo: un movimento verso l'alto o di lato lascia lo scroll al browser.
+      if (!g.fromHead && (dy < 0 || Math.abs(dx) > Math.abs(dy))) { if (Math.abs(dy) > 2 || Math.abs(dx) > 2) g = null; return; }
+      if (dy < DRAG_START) return;
+      g.active = true;
+      try { node.setPointerCapture(e.pointerId); } catch { /* evento sintetico o puntatore già rilasciato */ }
+    }
+    g.samples.push({ t: e.timeStamp, y: e.clientY });
+    while (g.samples.length > 2 && e.timeStamp - g.samples[0].t > 100) g.samples.shift();
+    set(Math.max(0, dy), false);
+  };
+  const up = (e) => {
+    if (!g || e.pointerId !== g.id) return;
+    const was = g;
+    g = null;
+    if (!was.active) return;
+    suppressClick = true;
+    setTimeout(() => { suppressClick = false; }, 0);
+    if (e.type === 'pointercancel') { reset(); return; }
+    const dy = Math.max(0, e.clientY - was.y0);
+    const first = was.samples[0];
+    const dt = e.timeStamp - first.t;
+    const v = dt > 0 ? (e.clientY - first.y) / dt : 0;
+    const h = node.offsetHeight;
+    if (dy > Math.max(120, h * 0.25) || (v > 0.5 && dy > DRAG_START)) {
+      requestClose(true, { dismiss: () => {
+        if (reducedMotion()) return Promise.resolve();
+        set(h, true);
+        return new Promise((r) => setTimeout(r, 250));
+      }, back: reset });
+    } else reset();
+  };
+  // Durante il gesto attivo, o all'avvio verso il basso dal corpo in cima, il touchmove non deve scrollare.
+  const touchMove = (e) => {
+    if (!g) return;
+    const t = e.touches[0];
+    if (g.active || (t && t.clientY - g.y0 > 0 && Math.abs(t.clientY - g.y0) >= Math.abs(t.clientX - g.x0))) e.preventDefault();
+  };
+  node.addEventListener('pointerdown', down);
+  node.addEventListener('pointermove', move);
+  node.addEventListener('pointerup', up);
+  node.addEventListener('pointercancel', up);
+  node.addEventListener('touchmove', touchMove, { passive: false });
+  // Un rilascio dopo il trascinamento non deve premere Annulla o Salva.
+  node.addEventListener('click', (e) => { if (suppressClick) { e.stopPropagation(); e.preventDefault(); } }, true);
 }
 
 // Foglio dal basso "Annulla · Titolo · Salva". onSave lancia ValidationError per mostrare l'errore.
-export function sheet({ title, saveLabel = 'Salva', onSave, onClose, content, cancelLabel = 'Annulla' }) {
+// v7: si chiude anche trascinandolo giù (attachDrag) o toccando il velo; se ci sono modifiche non salvate chiede
+// "Vuoi annullare le modifiche?" (risposta 4). Annulla ed Esc chiudono senza chiedere. Modifiche = un evento
+// input/change nel corpo o un clic su un pulsante con aria-pressed (chip, segmentato, colore, icona), oppure
+// l'opzione dirty() se il foglio vuole deciderlo da sé. I fogli senza Salva non chiedono mai.
+export function sheet({ title, saveLabel = 'Salva', onSave, onClose, content, cancelLabel = 'Annulla', dirty }) {
   const prevFocus = document.activeElement;
   const body = el('div', { class: 'sheet__body' });
   const titleId = 'sheet-title-' + (++openSheets);
-  const backdrop = el('div', { class: 'backdrop', on: { click: () => close() } });
+  const backdrop = el('div', { class: 'backdrop', on: { click: () => requestClose(false) } });
   const saveBtn = onSave ? el('button', { class: 'topbar__btn', type: 'button', text: saveLabel, id: 'sheet-save', on: { click: () => save() } }) : el('span');
+  const head = el('div', { class: 'sheet__head' },
+    el('button', { class: 'topbar__btn', type: 'button', text: onSave ? cancelLabel : 'Chiudi', id: 'sheet-cancel', on: { click: () => close() } }),
+    el('div', { class: 'sheet__title', id: titleId, text: title }),
+    saveBtn);
   const node = el('div', { class: 'sheet', attrs: { role: 'dialog', 'aria-modal': 'true', 'aria-labelledby': titleId } },
     el('div', { class: 'sheet__grabber', attrs: { 'aria-hidden': 'true' } }),
-    el('div', { class: 'sheet__head' },
-      el('button', { class: 'topbar__btn', type: 'button', text: onSave ? cancelLabel : 'Chiudi', id: 'sheet-cancel', on: { click: () => close() } }),
-      el('div', { class: 'sheet__title', id: titleId, text: title }),
-      saveBtn),
+    head,
     body);
+  let changed = false;
+  body.addEventListener('input', () => { changed = true; });
+  body.addEventListener('change', () => { changed = true; });
+  body.addEventListener('click', (e) => { if (e.target.closest?.('button[aria-pressed]')) changed = true; }, true);
+  const isDirty = () => !!onSave && (dirty ? !!dirty() : changed);
   let closed = false;
+  let asking = false;
   const untrap = trapEscape(() => close());
   function close(result) {
     if (closed) return;
@@ -256,8 +360,22 @@ export function sheet({ title, saveLabel = 'Salva', onSave, onClose, content, ca
     untrap();
     backdrop.remove();
     node.remove();
+    const i = sheetStack.indexOf(node);
+    if (i >= 0) sheetStack.splice(i, 1);
     onClose?.(result);
     if (prevFocus && document.contains(prevFocus)) prevFocus.focus?.();
+  }
+  // Chiusura dal gesto (fromDrag, con l'animazione di uscita) o dal velo: con modifiche chiede conferma.
+  async function requestClose(fromDrag, anim) {
+    if (closed || asking) return;
+    if (isDirty()) {
+      anim?.back();
+      asking = true;
+      const ok = await confirmDialog({ title: 'Vuoi annullare le modifiche?', confirmLabel: 'Annulla le modifiche', cancelLabel: 'Continua a modificare', destructive: true, stacked: true });
+      asking = false;
+      if (!ok) return;
+    } else if (anim) await anim.dismiss();
+    close();
   }
   async function save() {
     try {
@@ -270,31 +388,38 @@ export function sheet({ title, saveLabel = 'Salva', onSave, onClose, content, ca
       else { console.error(e); showFormError(body, new Error('Errore interno: ' + (e?.message || e))); }
     }
   }
-  const api = { body, close, save, setTitle: (t) => { node.querySelector('.sheet__title').textContent = t; }, node };
+  const api = { body, close, save, setTitle: (t) => { node.querySelector('.sheet__title').textContent = t; }, node, isDirty };
   if (typeof content === 'function') content(api); else if (content) append(body, [content]);
+  const level = sheetStack.length;
+  sheetStack.push(node);
+  if (level) { backdrop.style.zIndex = String(50 + level * 2); node.style.zIndex = String(51 + level * 2); }
+  attachDrag(node, backdrop, body, head, requestClose);
   sheetRoot().append(backdrop, node);
   setTimeout(() => { if (!body.contains(document.activeElement)) (body.querySelector('[autofocus]') || saveBtn)?.focus?.(); }, 30);
   return api;
 }
 
 // Avviso centrato: la domanda come titolo, l'azione distruttiva in rosso. Risolve true/false.
-export function confirmDialog({ title, message, confirmLabel = 'OK', cancelLabel = 'Annulla', destructive = false }) {
+// stacked (v7): pulsanti uno sopra l'altro per le etichette lunghe, l'azione in alto e la scelta sicura in grassetto sotto.
+export function confirmDialog({ title, message, confirmLabel = 'OK', cancelLabel = 'Annulla', destructive = false, stacked = false }) {
   return new Promise((resolve) => {
     const prevFocus = document.activeElement;
     const backdrop = el('div', { class: 'backdrop dialog-backdrop' });
     let done = false;
     const finish = (v) => { if (done) return; done = true; untrap(); backdrop.remove(); node.remove(); prevFocus?.focus?.(); resolve(v); };
     const ok = el('button', { type: 'button', text: confirmLabel, id: 'dialog-ok', class: destructive ? 'is-destructive' : '', on: { click: () => finish(true) } });
+    const cancelBtn = cancelLabel ? el('button', { type: 'button', text: cancelLabel, id: 'dialog-cancel', on: { click: () => finish(false) } }) : null;
     const node = el('div', { class: 'dialog', attrs: { role: 'alertdialog', 'aria-modal': 'true', 'aria-labelledby': 'dialog-title', 'aria-describedby': 'dialog-msg' } },
       el('div', { class: 'dialog__body' },
         el('p', { class: 'dialog__title', id: 'dialog-title', text: title }),
         message ? el('p', { class: 'dialog__msg', id: 'dialog-msg', text: message }) : null),
-      el('div', { class: 'dialog__actions' },
-        cancelLabel ? el('button', { type: 'button', text: cancelLabel, id: 'dialog-cancel', on: { click: () => finish(false) } }) : null,
-        ok));
+      el('div', { class: 'dialog__actions' + (stacked ? ' dialog__actions--stacked' : '') },
+        stacked ? ok : null,
+        cancelBtn,
+        stacked ? null : ok));
     const untrap = trapEscape(() => finish(false));
     sheetRoot().append(backdrop, node);
-    ok.focus();
+    (stacked && cancelBtn ? cancelBtn : ok).focus();
   });
 }
 

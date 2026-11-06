@@ -86,7 +86,21 @@ const VIEWS = {
 
 function resolve(path, query) {
   const r = resolveRoute(path, query);
-  return r.redirect ? r : { view: VIEWS[r.name], tab: r.tab };
+  return r.redirect ? r : { view: VIEWS[r.name], tab: r.tab, name: r.name };
+}
+
+// v7 (risposta 1): le Impostazioni ricordano la scheda da cui si è toccato ⚙︎ (indirizzo intero, es. il Calendario
+// di Movimenti): "‹ Conti" ci torna e quella scheda resta accesa. Aperte da un link diretto: Home, come la v6.
+const TAB_LABELS = { home: 'Home', movimenti: 'Movimenti', budget: 'Budget', statistiche: 'Statistiche', conti: 'Conti' };
+let lastTabRoot = null;
+let settingsFrom = null;
+function trackSettingsOrigin(r) {
+  if (r.name === 'impostazioni') {
+    if (!settingsFrom) settingsFrom = lastTabRoot || { tab: 'home', href: '#home' };
+    return;
+  }
+  settingsFrom = null;
+  lastTabRoot = r.name in TAB_LABELS ? { tab: r.tab, href: location.hash || '#home' } : null;
 }
 
 // Parametri passati in memoria da go(); restano validi finché non si cambia rotta.
@@ -102,17 +116,25 @@ function setQuery(q) {
   const { path } = parseHash();
   const s = new URLSearchParams(Object.entries(q).filter(([, v]) => v !== '' && v !== null && v !== undefined)).toString();
   history.replaceState(null, '', '#' + path.join('/') + (s ? '?' + s : ''));
+  // Su una scheda, "‹ Scheda" dalle Impostazioni torna all'indirizzo aggiornato, senza query già consumate
+  // (es. ?budget=<id>, che altrimenti riaprirebbe il foglio).
+  if (lastTabRoot && !settingsFrom) lastTabRoot.href = location.hash || '#home';
 }
 
 // ---- Barra in alto ----
+// v7 (decisione v7 §1): le 5 schede (le viste senza "‹ Indietro") hanno in alto a destra sempre e solo ⚙︎,
+// creato qui così l'aspetto e la posizione sono identici ovunque; le loro azioni stanno nel contenuto.
+// Le pagine di dettaglio hanno "‹ Indietro" a sinistra e l'azione principale (Modifica, Nuovo) a destra.
 function setHeader(container, { title, back, actions = [], large = true }) {
   clear($('topbar-left'));
   clear($('topbar-right'));
   $('topbar-title').textContent = title || '';
   if (back) {
     $('topbar-left').append(el('a', { class: 'topbar__btn', href: back.href, id: 'back-btn', attrs: { 'aria-label': 'Indietro: ' + (back.label || '') } }, icon('back', 22), el('span', { text: back.label || 'Indietro' })));
+    for (const a of actions) $('topbar-right').append(a);
+  } else {
+    $('topbar-right').append(el('a', { class: 'topbar__btn topbar__btn--circle', href: '#impostazioni', id: 'settings-btn', attrs: { 'aria-label': 'Impostazioni' } }, icon('gear')));
   }
-  for (const a of actions) $('topbar-right').append(a);
   if (large && title) container.append(el('h1', { class: 'large-title', text: title }));
   document.title = title ? `${title} · MoneyFlow` : 'MoneyFlow';
 }
@@ -136,14 +158,17 @@ function renderNow() {
   const { path, query } = parseHash();
   const r = resolve(path, query);
   if (r.redirect) { location.replace('#' + r.redirect); return; }
+  trackSettingsOrigin(r);
+  const tab = r.name === 'impostazioni' ? settingsFrom.tab : r.tab;
   for (const t of document.querySelectorAll('.tab')) {
-    if (t.dataset.tab === r.tab) t.setAttribute('aria-current', 'page'); else t.removeAttribute('aria-current');
+    if (t.dataset.tab === tab) t.setAttribute('aria-current', 'page'); else t.removeAttribute('aria-current');
   }
   clear(viewEl);
   const ctx = {
     store, prefs, sync, install, go, rerender, setQuery, applyTheme, path, query, params, tax: taxSettings,
     today: () => todayISO(),
     header: (opts) => setHeader(viewEl, opts),
+    settingsBack: settingsFrom ? { href: settingsFrom.href, label: TAB_LABELS[settingsFrom.tab] } : null,
     getVersion,
   };
   try {

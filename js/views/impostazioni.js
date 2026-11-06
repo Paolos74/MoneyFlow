@@ -1,8 +1,10 @@
-// Impostazioni: tema, categorie, budget, periodo di budget (v4), backup, esportazione e importazione CSV,
+// Impostazioni: tema, categorie, periodo di budget (v4), backup, esportazione e importazione CSV,
 // sincronizzazione Firebase, strumenti (collegamento al fondo pensione, ora in Statistiche), installazione, versione.
+// v7: i budget si gestiscono solo nella scheda Budget (#impostazioni/budget → #budget); "‹ Indietro" torna alla
+// scheda da cui si è toccato ⚙︎. Il foglio categoria (senza campo Budget) si apre anche dai fogli dei movimenti.
 
 import { el, list, row, section, segmented, sheet, field, input, colorPicker, iconPicker, toast, button, confirmDialog, shareOrDownload, attempt, card } from '../ui.js';
-import { formatEuro, parseEuroInput, formatEuroPlain } from '../money.js';
+import { formatEuro } from '../money.js';
 import { formatDateIt, todayISO } from '../dates.js';
 import { ValidationError, StorageError } from '../errors.js';
 import { PALETTE, DATA_KEY } from '../store.js';
@@ -15,7 +17,6 @@ import { render as importa } from './importa.js';
 const SECTIONS = {
   tema: { title: 'Tema', icon: 'sun', color: 'var(--amber-fill)' },
   categorie: { title: 'Categorie', icon: 'tag', color: 'var(--pink-fill)' },
-  budget: { title: 'Budget', icon: 'gauge', color: 'var(--amber-fill)' },
   periodo: { title: 'Periodo di budget', icon: 'calendar', color: 'var(--teal-fill)' },
   backup: { title: 'Backup', icon: 'download', color: '#2563EB' },
   csv: { title: 'Esporta CSV', icon: 'doc', color: 'var(--teal-fill)' },
@@ -34,10 +35,10 @@ export function render(root, ctx) {
   const sec = ctx.path[1];
   if (sec && SECTIONS[sec]) {
     ctx.header({ title: SECTIONS[sec].title, back: { href: '#impostazioni', label: 'Impostazioni' } });
-    ({ tema, categorie, budget, periodo, backup, csv, importa, sync, installa })[sec](root, ctx);
+    ({ tema, categorie, periodo, backup, csv, importa, sync, installa })[sec](root, ctx);
     return;
   }
-  ctx.header({ title: 'Impostazioni', back: { href: '#home', label: 'Home' } });
+  ctx.header({ title: 'Impostazioni', back: ctx.settingsBack || { href: '#home', label: 'Home' } });
   const st = ctx.sync.status();
   const sub = {
     tema: { auto: 'Automatico', light: 'Chiaro', dark: 'Scuro' }[ctx.prefs.get().theme],
@@ -47,7 +48,7 @@ export function render(root, ctx) {
     importa: 'Revolut o altri estratti conto',
     periodo: ctx.prefs.get().budgetPeriod === 'salary' ? 'Dallo stipendio' : 'Mese di calendario',
   };
-  root.append(section({ title: 'Generale' }, list(...['tema', 'categorie', 'budget', 'periodo'].map((k) => row({ icon: SECTIONS[k].icon, color: SECTIONS[k].color, title: SECTIONS[k].title, subtitle: sub[k], href: `#impostazioni/${k}`, id: `set-${k}` })))));
+  root.append(section({ title: 'Generale' }, list(...['tema', 'categorie', 'periodo'].map((k) => row({ icon: SECTIONS[k].icon, color: SECTIONS[k].color, title: SECTIONS[k].title, subtitle: sub[k], href: `#impostazioni/${k}`, id: `set-${k}` })))));
   root.append(section({ title: 'Dati' }, list(...['backup', 'csv', 'importa', 'sync'].map((k) => row({ icon: SECTIONS[k].icon, color: SECTIONS[k].color, title: SECTIONS[k].title, subtitle: sub[k], href: `#impostazioni/${k}`, id: `set-${k}` })))));
   root.append(section({ title: 'Strumenti' }, list(row({ icon: PENSION.icon, color: PENSION.color, title: PENSION.title, subtitle: 'In Statistiche: stima di costo e risparmio di tasse', href: '#statistiche/fondo-pensione', id: 'set-fondo-pensione' }))));
   root.append(section({ title: 'App' }, list(row({ icon: 'phone', color: SECTIONS.installa.color, title: SECTIONS.installa.title, subtitle: ctx.install.installed() ? 'Già installata' : 'Android e iPhone', href: '#impostazioni/installa', id: 'set-installa' }),
@@ -77,23 +78,26 @@ function categorie(root, ctx) {
   root.append(el('p', { class: 'section-footer', text: 'Se elimini una categoria, i movimenti restano con l\'etichetta "(eliminata)".' }));
 }
 
-function openCategoryForm(ctx, cat, type) {
+// Foglio categoria: nome, icona, colore. v7 (risposta 3): niente campo Budget (i budget stanno nella scheda Budget);
+// modificando una categoria il budget già impostato resta (non è nel patch). Dai fogli dei movimenti, del
+// programmato e dall'import CSV si apre sopra il foglio aperto con il tipo fisso: onCreated(id) riceve la
+// categoria nuova, onCancel la chiusura senza salvare. Nome unico per tipo senza maiuscole (lo controlla lo store).
+export function openCategoryForm(ctx, cat, type, { onCreated, onCancel } = {}) {
   const state = ctx.store.getState();
-  const d = cat ? { name: cat.name, color: cat.color, budgetText: cat.budget ? formatEuroPlain(cat.budget) : '', icon: cat.icon || null } : { name: '', color: PALETTE[state.categories.length % PALETTE.length], budgetText: '', icon: null };
+  const d = cat ? { name: cat.name, color: cat.color, icon: cat.icon || null } : { name: '', color: PALETTE[state.categories.length % PALETTE.length], icon: null };
+  let created = null;
   const api = sheet({
     title: cat ? 'Modifica categoria' : type === 'uscita' ? 'Nuova categoria di uscita' : 'Nuova categoria di entrata',
     onSave: () => {
-      let b = null;
-      if (type === 'uscita' && d.budgetText.trim()) { b = parseEuroInput(d.budgetText); if (!b) throw new ValidationError('Budget non valido', 'budget'); }
-      const inp = { name: d.name, color: d.color, budget: b, type, role: cat?.role || null, icon: d.icon };
-      if (cat) ctx.store.updateCategory(cat.id, inp); else ctx.store.addCategory({ ...inp, order: state.categories.length });
+      const inp = { name: d.name, color: d.color, type, role: cat?.role || null, icon: d.icon };
+      if (cat) ctx.store.updateCategory(cat.id, inp); else created = ctx.store.addCategory({ ...inp, order: state.categories.length });
       toast(cat ? 'Categoria aggiornata' : 'Categoria creata');
       return true;
     },
+    onClose: () => { if (created) onCreated?.(created.id); else onCancel?.(); },
     content: (s) => {
       s.body.append(el('div', { class: 'form-group' },
-        field({ label: 'Nome', field: 'name', id: 'c-name', input: input({ id: 'c-name', value: d.name, maxlength: 60, onInput: (v) => { d.name = v; } }) }),
-        type === 'uscita' ? field({ label: 'Budget per periodo (€, facoltativo)', field: 'budget', id: 'c-budget', input: input({ id: 'c-budget', value: d.budgetText, inputmode: 'decimal', placeholder: 'Nessuno', onInput: (v) => { d.budgetText = v; } }) }) : null),
+        field({ label: 'Nome', field: 'name', id: 'c-name', input: input({ id: 'c-name', value: d.name, maxlength: 60, onInput: (v) => { d.name = v; } }) })),
       el('p', { class: 'field__label', text: 'Icona' }),
       el('div', { class: 'form-group' }, el('div', { class: 'field' }, iconPicker(d.icon || C.categoryIconOf(cat), (v) => { d.icon = v; }))),
       el('p', { class: 'field__label', text: 'Colore' }),
@@ -104,8 +108,10 @@ function openCategoryForm(ctx, cat, type) {
           if (attempt(() => ctx.store.deleteCategory(cat.id))) toast('Categoria eliminata', { undo: () => ctx.store.restoreCategory(cat.id) });
         } } })));
       }
+      if (onCreated) setTimeout(() => document.getElementById('c-name')?.focus(), 0);
     },
   });
+  return api;
 }
 
 // ---- Periodo di budget (v4) ----
@@ -120,32 +126,6 @@ function periodo(root, ctx) {
     ? 'Il periodo va dall\'ultima entrata Stipendio registrata al giorno prima della successiva. Finché non arriva, la fine è stimata alla stessa data del mese dopo; se lo stipendio è in ritardo, il periodo arriva a oggi.'
     : 'Il periodo va dal 1° all\'ultimo giorno del mese.' }));
   root.append(el('p', { class: 'section-footer', text: 'Vale per "Quanto ti resta", "Puoi spendere oggi" e i budget per categoria. Statistiche e CSV restano a mesi di calendario. Preferenza di questo dispositivo.' }));
-}
-
-// ---- Budget ----
-function budget(root, ctx) {
-  const state = ctx.store.getState();
-  const cats = C.sortedCategories(state, 'uscita');
-  root.append(section({ title: 'Budget per categoria', footer: 'Vale per il periodo di budget (mese di calendario o dallo stipendio). Quando lo superi, la barra nella scheda Budget diventa rossa e compare un avviso al salvataggio della spesa. Le quote escluse non contano.' },
-    list(...cats.map((c) => row({ icon: C.categoryIconOf(c), color: c.color, title: c.name, value: c.budget ? formatEuro(c.budget) : 'Nessuno', valueClass: c.budget ? '' : 'is-muted', attrs: { 'data-budget-cat': c.id },
-      onClick: () => {
-        let text = c.budget ? formatEuroPlain(c.budget) : '';
-        sheet({
-          title: `Budget ${c.name}`,
-          onSave: () => {
-            const v = text.trim() ? parseEuroInput(text) : null;
-            if (text.trim() && !v) throw new ValidationError('Importo non valido', 'budget');
-            ctx.store.updateCategory(c.id, { budget: v });
-            toast(v ? 'Budget salvato' : 'Budget tolto');
-            return true;
-          },
-          content: (s) => {
-            s.body.append(el('div', { class: 'form-group' }, field({ label: 'Importo per periodo (€)', field: 'budget', id: 'b-amount', hint: 'Lascia vuoto per togliere il budget.',
-              input: input({ id: 'b-amount', value: text, inputmode: 'decimal', placeholder: '0,00', cls: 'input--amount', onInput: (v) => { text = v; } }) })));
-            setTimeout(() => document.getElementById('b-amount')?.focus(), 0);
-          },
-        });
-      } })))));
 }
 
 // ---- Backup ----

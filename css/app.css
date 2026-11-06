@@ -841,3 +841,33 @@ button.advice__row { width: 100%; background: none; border: 0; font: inherit; te
 @media (prefers-contrast: more) {
   .notice-row { border: 1px solid var(--separator); }
 }
+
+/* v7: ⚙︎ Impostazioni sempre in alto a destra nelle 5 schede. Disegno da 40 px, area di tocco 44 × 44. */
+.topbar__btn--circle { position: relative; }
+.topbar__btn--circle::before { content: ""; position: absolute; inset: -2px; border-radius: 50%; }
+
+/* v7: riga di azioni sotto il titolo grande (Importa CSV, Nuovo conto, Nuovo obiettivo) */
+.title-actions { margin: -4px 0 16px; }
+.title-actions > .btn { flex: none; min-height: 44px; background: var(--surface); color: var(--accent); box-shadow: var(--shadow); }
+
+/* v7: Piano della scheda Budget, righe toccabili e "Aggiungi budget" */
+button.meter { width: 100%; background: none; border: 0; padding: 10px 0; margin: 0; text-align: left; color: inherit; font: inherit; }
+.meter--cat > .row__chev { flex: none; align-self: center; }
+.plan__add { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 48px; padding: 4px 0; margin: 0; background: none; border: 0; border-top: 0.5px solid var(--separator); color: var(--accent); font: inherit; font-weight: 600; text-align: left; }
+.plan__add svg { flex: none; }
+.plan__add:first-child { border-top: 0; }
+
+/* v7: chip "+ Nuova categoria" nei fogli dei movimenti */
+.chip.chip--new { background: transparent; box-shadow: none; border: 1px dashed var(--accent); color: var(--accent); font-weight: 600; }
+.chip--new svg { flex: none; }
+
+/* v7: fogli chiusi trascinandoli giù; la presa è la maniglia con l'intestazione, il corpo scorre da sé */
+.sheet__grabber, .sheet__head { touch-action: none; }
+.sheet__body { touch-action: pan-x pan-y; }
+.sheet__grabber { margin-top: 6px; }
+
+/* v7: avviso con i pulsanti uno sopra l'altro ("Vuoi annullare le modifiche?") */
+.dialog__actions--stacked { flex-direction: column; }
+.dialog__actions--stacked button + button { border-left: 0; border-top: 0.5px solid var(--separator); }
+/* v7: con le barre di scorrimento del computer ⚙︎ resta allo stesso posto anche nelle pagine corte */
+html { scrollbar-gutter: stable; }

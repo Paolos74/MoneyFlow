@@ -1,14 +1,17 @@
 // Importa movimenti da CSV (v4): scelta del file, formato (Revolut o colonne scelte), conto e categorie,
 // anteprima con doppioni non spuntati, conferma in un solo salvataggio con Annulla. Il file resta sul dispositivo.
+// v7: ogni scelta della categoria ha in fondo "+ Nuova categoria…", che apre il foglio categoria e poi la sceglie.
 
 import { el, card, section, list, button, field, select, toggle, toast, emptyState, attempt } from '../ui.js';
 import { formatEuro } from '../money.js';
 import { formatDateIt } from '../dates.js';
 import * as C from '../calc.js';
 import { parseCsv, detectRevolut, guessColumns, hasHeaderRow, buildImportRows, suggestCategory } from '../csv-import.js';
+import { openCategoryForm } from './impostazioni.js';
 
 // Bozza dell'importazione: resta tra un ridisegno e l'altro finché non si importa o si ricomincia.
 let draft = null;
+const NEW_CAT = '__nuova-categoria__';
 
 const defaultCategory = (state, type) => {
   const live = C.sortedCategories(state, type);
@@ -83,12 +86,17 @@ function renderSetup(root, ctx, state, accounts) {
       el('p', { class: 'field__hint', text: 'Attivalo se nel file le uscite sono positive. Date: GG/MM/AAAA, GG-MM-AAAA, GG.MM.AAAA o AAAA-MM-GG; importi come 1.234,56 o 1234.56.' }))));
   }
 
-  const catOpts = (type) => C.sortedCategories(state, type).map((c) => ({ value: c.id, label: c.name }));
+  const catOpts = (type) => [...C.sortedCategories(state, type).map((c) => ({ value: c.id, label: c.name })), { value: NEW_CAT, label: '+ Nuova categoria…' }];
+  // "+ Nuova categoria…": la select torna al valore della bozza con Annulla, prende la nuova categoria al salvataggio.
+  const pickCat = (type, set) => (v) => {
+    if (v !== NEW_CAT) { set(v); redraw(); return; }
+    openCategoryForm(ctx, null, type, { onCreated: (id) => { set(id); redraw(); }, onCancel: redraw });
+  };
   root.append(section({ title: 'Dove e come' }, el('div', { class: 'form-group' },
     field({ label: 'Conto', field: 'accountId', id: 'import-account', input: select({ id: 'import-account', options: accounts.map((a) => ({ value: a.id, label: a.name })), value: d.accountId, onChange: (v) => { d.accountId = v; redraw(); } }) }),
     field({ label: 'Categoria per le uscite', id: 'import-cat-out', hint: 'Le righe con una descrizione già usata prendono la categoria dell\'ultima volta. Puoi cambiarla riga per riga.',
-      input: select({ id: 'import-cat-out', options: catOpts('uscita'), value: d.catOut, onChange: (v) => { d.catOut = v; redraw(); } }) }),
-    field({ label: 'Categoria per le entrate', id: 'import-cat-in', input: select({ id: 'import-cat-in', options: catOpts('entrata'), value: d.catIn, onChange: (v) => { d.catIn = v; redraw(); } }) }))));
+      input: select({ id: 'import-cat-out', options: catOpts('uscita'), value: d.catOut, onChange: pickCat('uscita', (v) => { d.catOut = v; }) }) }),
+    field({ label: 'Categoria per le entrate', id: 'import-cat-in', input: select({ id: 'import-cat-in', options: catOpts('entrata'), value: d.catIn, onChange: pickCat('entrata', (v) => { d.catIn = v; }) }) }))));
 
   if (d.kind === 'generic' && (d.date < 0 || d.amount < 0)) {
     root.append(el('p', { class: 'section-footer', id: 'import-need-cols', text: 'Scegli almeno le colonne Data e Importo per vedere l\'anteprima.' }));
@@ -124,7 +132,7 @@ function renderSetup(root, ctx, state, accounts) {
           el('span', { class: 'row__title', text: r.description || (r.type === 'uscita' ? 'Uscita' : 'Entrata') }),
           el('span', { class: 'row__sub' }, el('span', { text: formatDateIt(r.date) }), r.duplicate ? el('span', { class: 'tag', text: 'Già presente' }) : null)),
         el('span', { class: `row__value ${r.type === 'entrata' ? 'is-income' : ''}`, text: r.type === 'uscita' ? formatEuro(-r.amount) : '+' + formatEuro(r.amount) }),
-        el('span', { class: 'row__actions' }, select({ id: 'import-cat-' + i, options: catOpts(r.type), value: r.categoryId, onChange: (v) => { o.categoryId = v; redraw(); } })));
+        el('span', { class: 'row__actions' }, select({ id: 'import-cat-' + i, options: catOpts(r.type), value: r.categoryId, onChange: pickCat(r.type, (v) => { o.categoryId = v; }) })));
     }))));
   }
   if (skipped.length) {

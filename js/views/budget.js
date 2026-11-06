@@ -4,14 +4,19 @@
 // v5: "Quanto ti resta" sul budget complessivo con colore progressivo, "Hai sforato di" e consiglio discreto.
 // v6: dal budget si tolgono anche i programmati da pagare (riga "Programmati da pagare"); le barre del Piano
 // contano speso + programmati della categoria ("di cui X programmati", risposta 1B).
+// v7 (decisione v7 §2): i budget si creano, cambiano e tolgono solo qui, nel Piano: tocco sulla riga → foglio
+// "Budget <Categoria>" (con "Vedi le spese del periodo"), "Aggiungi budget" per le categorie senza budget.
+// #budget?budget=<id> apre il foglio di quella categoria, #budget?budget=nuovo "Aggiungi budget".
 
-import { el, card, section, list, row, segmented, emptyState, button, progress, icon, iconBox, svgNode } from '../ui.js';
+import { el, card, section, list, row, segmented, emptyState, button, progress, icon, iconBox, svgNode, sheet, field, input, chips, toast } from '../ui.js';
 import { ring } from '../charts.js';
-import { formatEuro, formatPercent } from '../money.js';
+import { formatEuro, formatPercent, parseEuroInput, formatEuroPlain } from '../money.js';
+import { ValidationError } from '../errors.js';
 import { formatDateIt, MONTHS, monthLabel, monthOf, parseISO } from '../dates.js';
 import * as C from '../calc.js';
 import { budgetPeriod, remaining, progressStop } from '../period.js';
 import { openGoalForm } from './conti.js';
+import { titleActions } from './parts.js';
 
 const dayMonth = (iso) => { const p = parseISO(iso); return `${p.d} ${MONTHS[p.m - 1]}`; };
 
@@ -127,7 +132,7 @@ function budgetAdviceRows(state, p, prefix) {
     const live = cat && !cat.deleted;
     rows.push(adviceRow({
       id: `${prefix}-advice`, text: `${formatEuro(first.value)} in ${C.categoryLabel(state, first.categoryId)}${more}, senza budget`,
-      action: live ? 'Crea un budget' : 'Scegli la categoria', href: live ? '#impostazioni/budget' : moveLink(p, first.categoryId),
+      action: live ? 'Crea un budget' : 'Scegli la categoria', href: live ? `#budget?budget=${encodeURIComponent(first.categoryId)}` : moveLink(p, first.categoryId),
     }));
   }
   if (a.other > 0) {
@@ -138,18 +143,19 @@ function budgetAdviceRows(state, p, prefix) {
 
 // Invito in Home senza budget (design §4.3).
 export function setBudgetsInvite(id) {
-  return el('div', { class: 'advice' }, adviceRow({ id, glyph: 'gauge', href: '#impostazioni/budget', text: 'Con i budget qui vedi quanto ti resta da spendere', action: 'Imposta i budget' }));
+  return el('div', { class: 'advice' }, adviceRow({ id, glyph: 'gauge', href: '#budget?budget=nuovo', text: 'Con i budget qui vedi quanto ti resta da spendere', action: 'Imposta i budget' }));
 }
 
 export function render(root, ctx) {
   const state = ctx.store.getState();
   const seg = ctx.path[1] === 'obiettivi' ? 'obiettivi' : 'budget';
-  const actions = seg === 'obiettivi'
-    ? [el('button', { class: 'topbar__btn', type: 'button', text: 'Nuovo', id: 'budget-new', on: { click: () => openGoalForm(ctx) } })]
-    : [];
-  ctx.header({ title: seg === 'budget' ? 'Budget' : 'Obiettivi', actions });
+  // v7: in alto a destra c'è solo ⚙︎; "Nuovo obiettivo" sta sotto il segmentato (con almeno un obiettivo).
+  ctx.header({ title: seg === 'budget' ? 'Budget' : 'Obiettivi' });
   root.append(segmented([{ value: 'budget', label: 'Budget', id: 'seg-budget' }, { value: 'obiettivi', label: 'Obiettivi', id: 'seg-obiettivi' }], seg,
     (v) => ctx.go(v === 'budget' ? 'budget' : 'budget/obiettivi'), { label: 'Sezione' }));
+  if (seg === 'obiettivi' && state.goals.some((g) => !g.deleted)) {
+    root.append(titleActions(button('Nuovo obiettivo', () => openGoalForm(ctx), { small: true, icon: 'plus', id: 'budget-new' })));
+  }
   if (seg === 'budget') renderBudget(root, ctx, state); else renderGoals(root, ctx, state);
 }
 
@@ -186,18 +192,34 @@ function renderBudget(root, ctx, state) {
   p.mode === 'calendar-fallback' ? el('p', { class: 'hero__sub', text: 'Nessuno stipendio registrato: si usa il mese di calendario.' }) : null,
   r.mode === 'budget' ? budgetAdviceBlock(state, p, 'budget') : null));
 
-  // Piano: budget per categoria nel periodo
+  // Piano: budget per categoria nel periodo. v7: il tocco apre il foglio del budget; in fondo "Aggiungi budget".
   const budgets = C.budgetStatus(state, p, today);
-  root.append(section({ title: 'Piano', cls: 'section--t-amber', action: el('a', { href: '#impostazioni/budget', id: 'budget-edit', text: 'Modifica' }) },
+  const without = C.sortedCategories(state, 'uscita').filter((c) => !c.budget);
+  const addRow = without.length
+    ? el('button', { class: 'plan__add', type: 'button', id: 'budget-add', on: { click: () => openAddBudgetSheet(ctx, p) } }, icon('plus', 18), el('span', { text: 'Aggiungi budget' }))
+    : null;
+  root.append(section({ title: 'Piano', cls: 'section--t-amber', footer: budgets.length ? 'Tocca una categoria per cambiare o togliere il budget. Vale per il periodo di budget; le quote escluse non contano.' : null },
     budgets.length
-      ? card({ cls: 'plan' }, budgets.map((b) => el('a', { class: 'meter meter--cat' + (b.over ? ' is-over' : ''), href: `#movimenti?periodo=custom&da=${p.from}&a=${p.to}&categoria=${encodeURIComponent(b.category.id)}`, attrs: { 'data-budget': b.category.id, 'aria-label': `${b.category.name}: vedi i movimenti del periodo` } },
+      ? card({ cls: 'plan' }, budgets.map((b) => el('button', { class: 'meter meter--cat' + (b.over ? ' is-over' : ''), type: 'button', attrs: { 'data-budget': b.category.id, 'aria-label': `${b.category.name}: budget ${formatEuro(b.budget)}, ${b.over ? `superato di ${formatEuro(-b.left)}` : `restano ${formatEuro(b.left)}`}. Cambia il budget` },
+        on: { click: () => openBudgetSheet(ctx, b.category, p) } },
         iconBox(C.categoryIcon(state, b.category.id), b.category.color),
         el('div', { class: 'meter__body' },
           el('div', { class: 'meter__top' }, el('span', { class: 'meter__name', text: b.category.name }),
             el('span', { text: `${formatEuro(b.used)} / ${formatEuro(b.budget)}` })),
           progress(b.used / b.budget, { color: b.category.color, over: b.over }),
-          el('div', { class: 'meter__note', text: (b.over ? `Superato di ${formatEuro(-b.left)}` : `Restano ${formatEuro(b.left)}`) + (b.planned > 0 ? ` · di cui ${formatEuro(b.planned)} programmati` : '') })))))
-      : list(row({ icon: 'gauge', color: 'var(--amber-fill)', title: 'Imposta i budget', subtitle: 'Quanto ti resta userà la somma dei budget', href: '#impostazioni/budget', id: 'budget-set' }))));
+          el('div', { class: 'meter__note', text: (b.over ? `Superato di ${formatEuro(-b.left)}` : `Restano ${formatEuro(b.left)}`) + (b.planned > 0 ? ` · di cui ${formatEuro(b.planned)} programmati` : '') })),
+        el('span', { class: 'row__chev' }, icon('chevron')))), addRow)
+      : list(row({ icon: 'gauge', color: 'var(--amber-fill)', title: 'Imposta i budget', subtitle: 'Quanto ti resta userà la somma dei budget', onClick: () => openAddBudgetSheet(ctx, p), id: 'budget-set' }))));
+
+  // Collegamenti vecchi e consigli (#budget?budget=…): il foglio si apre una volta, poi la query si toglie.
+  const want = ctx.query.budget;
+  if (want && !ctx.params.opened) {
+    ctx.params.opened = true;
+    ctx.setQuery({});
+    const cat = C.sortedCategories(state, 'uscita').find((c) => c.id === want);
+    if (cat) openBudgetSheet(ctx, cat, p);
+    else if (want === 'nuovo' && without.length) openAddBudgetSheet(ctx, p);
+  }
 
   // Andamento: prime 3 categorie di spesa del periodo
   const cats = C.byCategory(state, p.from, p.to, 'uscita').slice(0, 3);
@@ -235,4 +257,59 @@ function renderGoals(root, ctx, state) {
   root.append(...active.map(goalCard));
   if (done.length) root.append(section({ title: 'Completati', cls: 'goals-done' }, ...done.map(goalCard)));
   root.append(el('div', { class: 'btn-row' }, button('Nuovo obiettivo', () => openGoalForm(ctx), { icon: 'plus', id: 'goal-new' })));
+}
+
+// Foglio "Budget <Categoria>" (prima in Impostazioni → Budget): importo per periodo, vuoto = togli;
+// "Vedi le spese del periodo" apre Movimenti filtrati per categoria e periodo (risposta 2).
+export function openBudgetSheet(ctx, cat, p) {
+  let text = cat.budget ? formatEuroPlain(cat.budget) : '';
+  return sheet({
+    title: `Budget ${cat.name}`,
+    onSave: () => {
+      const v = text.trim() ? parseEuroInput(text) : null;
+      if (text.trim() && !v) throw new ValidationError('Importo non valido (es. 250,00)', 'budget');
+      if (v === (cat.budget || null)) return true;
+      ctx.store.updateCategory(cat.id, { budget: v });
+      toast(v ? 'Budget salvato' : 'Budget tolto');
+      return true;
+    },
+    content: (s) => {
+      s.body.append(el('div', { class: 'form-group' }, field({ label: 'Importo per periodo (€)', field: 'budget', id: 'b-amount', hint: cat.budget ? 'Lascia vuoto per togliere il budget.' : 'Vale per ogni periodo di budget.',
+        input: input({ id: 'b-amount', value: text, inputmode: 'decimal', placeholder: '0,00', cls: 'input--amount', onInput: (v) => { text = v; } }) })),
+      list(row({ icon: 'list', color: 'var(--teal-fill)', title: 'Vedi le spese del periodo', subtitle: periodText(p), id: 'b-movements',
+        onClick: () => { s.close(); ctx.go(moveLink(p, cat.id).slice(1)); } })));
+      setTimeout(() => document.getElementById('b-amount')?.focus(), 0);
+    },
+  });
+}
+
+// Foglio "Aggiungi budget": scelta della categoria di uscita senza budget e importo.
+export function openAddBudgetSheet(ctx, p) {
+  const d = { categoryId: '', text: '' };
+  const cats = () => C.sortedCategories(ctx.store.getState(), 'uscita').filter((c) => !c.budget);
+  const box = el('div', { class: 'field' });
+  const drawChips = () => {
+    box.replaceChildren(chips(cats().map((c) => ({ value: c.id, label: c.name, color: c.color, id: 'b-cat-' + c.id })), d.categoryId,
+      (v) => { d.categoryId = v; drawChips(); document.getElementById('b-cat-' + v)?.focus(); }, { wrap: true, label: 'Categoria' }),
+    el('p', { class: 'field__error', hidden: true, attrs: { 'aria-live': 'polite' } }));
+  };
+  drawChips();
+  return sheet({
+    title: 'Aggiungi budget',
+    onSave: () => {
+      if (!d.categoryId) throw new ValidationError('Scegli una categoria', 'categoryId');
+      const v = parseEuroInput(d.text);
+      if (!v) throw new ValidationError(d.text.trim() ? 'Importo non valido (es. 250,00)' : 'Inserisci l\'importo', 'budget');
+      ctx.store.updateCategory(d.categoryId, { budget: v });
+      toast('Budget salvato');
+      return true;
+    },
+    content: (s) => {
+      s.body.append(el('p', { class: 'field__label', text: 'Categoria' }),
+        el('div', { class: 'form-group', dataset: { field: 'categoryId' } }, box),
+        el('div', { class: 'form-group' }, field({ label: 'Importo per periodo (€)', field: 'budget', id: 'b-amount',
+          input: input({ id: 'b-amount', value: d.text, inputmode: 'decimal', placeholder: '0,00', cls: 'input--amount', onInput: (v) => { d.text = v; } }) })),
+        el('p', { class: 'section-footer', text: 'Quanto ti resta userà la somma dei budget, meno le uscite e i pagamenti programmati del periodo.' }));
+    },
+  });
 }

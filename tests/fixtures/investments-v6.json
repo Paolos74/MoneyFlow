@@ -1,0 +1,24 @@
+{
+  "app": "MoneyFlow",
+  "schemaVersion": 1,
+  "investments": [
+    {
+      "id": "v6-0014",
+      "createdAt": 1767268819000,
+      "updatedAt": 1767268821000,
+      "deleted": false,
+      "name": "ETF Azionario prova",
+      "code": "IE00PROVA0001",
+      "color": "#DB2777",
+      "order": 0,
+      "taxRateBp": 2600,
+      "taxRegime": "amministrato",
+      "prices": [
+        {
+          "date": "2026-02-13",
+          "price": 1050000
+        }
+      ]
+    }
+  ]
+}

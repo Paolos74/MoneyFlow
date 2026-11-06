@@ -249,6 +249,56 @@ function e6() {
   return { ...w, bills };
 }
 
+// ---- v7 (decisione v7 §3): "Quanto metti da parte" toglie anche i programmati da pagare nel periodo ----
+// E6 + stipendio 2.000,00 il 01/11, oggi 21/11: uscite 250,00 (240,00 + Abbonamenti 10,00 confermato), programmati
+// da pagare 60,00 (futuro) + 15,00 (scaduto) = 75,00; saltato, fuori periodo, entrata e trasferimento non contano.
+// Metti da parte 2.000,00 − 250,00 − 75,00 = 1.675,00 €; tasso 1.675 ÷ 2.000 = 83,75 % → 83,8 %.
+test('v7 metti da parte: 2.000,00 − 250,00 − 75,00 = 1.675,00 €, 83,8 % delle entrate', () => {
+  const { store, salary } = e6();
+  salary('2026-11-01', 200000);
+  const s = store.getState();
+  const p = budgetPeriod(s, '2026-11-21');
+  const sv = savedInPeriod(s, p, '2026-11-21');
+  assert.deepEqual([sv.income, sv.expense, sv.planned, sv.net, sv.rate], [200000, 25000, 7500, 167500, 838]);
+  // stesso insieme di programmati di "Quanto ti resta"
+  assert.equal(sv.planned, remaining(s, p, '2026-11-21').planned);
+  // senza today: il calcolo della v6 (entrate − uscite), 1.750,00 € e 87,5 %
+  const old = savedInPeriod(s, p);
+  assert.deepEqual([old.planned, old.net, old.rate], [0, 175000, 875]);
+});
+
+test('v7 metti da parte: confermando Bollette 60,00 resta 1.675,00 € (nessun doppio conteggio); saltando Abbonamenti 15,00 sale a 1.690,00 €', () => {
+  const { store, salary, bills } = e6();
+  salary('2026-11-01', 200000);
+  store.confirmOccurrence(bills.id, '2026-11-25', { amount: 6000 });
+  let s = store.getState();
+  let sv = savedInPeriod(s, budgetPeriod(s, '2026-11-21'), '2026-11-21');
+  assert.deepEqual([sv.expense, sv.planned, sv.net], [31000, 1500, 167500]);
+  const late = s.scheduled.find((x) => x.amount === 1500);
+  store.skipOccurrence(late.id, '2026-11-18');
+  s = store.getState();
+  sv = savedInPeriod(s, budgetPeriod(s, '2026-11-21'), '2026-11-21');
+  // 2.000,00 − 310,00 − 0 = 1.690,00; 1.690 ÷ 2.000 = 84,5 %
+  assert.deepEqual([sv.expense, sv.planned, sv.net, sv.rate], [31000, 0, 169000, 845]);
+});
+
+test('v7 metti da parte dallo stipendio 27/10–26/11: 2.000,00 − 100,00 − 50,00 = 1.850,00 €; solo programmati → −50,00 €', () => {
+  const { store, cat, eur, salary } = world();
+  salary('2026-10-27');
+  store.addMovement({ type: 'uscita', date: '2026-10-30', amount: 10000, accountId: eur.id, categoryId: cat('uscita', 'Spesa') });
+  store.addScheduled({ type: 'uscita', amount: 5000, accountId: eur.id, categoryId: cat('uscita', 'Bollette'), start: '2026-11-20', freq: 'once' });
+  // prima dell'inizio e dopo la fine del periodo: non contano
+  store.addScheduled({ type: 'uscita', amount: 7000, accountId: eur.id, categoryId: cat('uscita', 'Casa'), start: '2026-10-25', freq: 'once' });
+  store.addScheduled({ type: 'uscita', amount: 4000, accountId: eur.id, categoryId: cat('uscita', 'Bollette'), start: '2026-11-27', freq: 'once' });
+  const s = store.getState();
+  const p = budgetPeriod(s, '2026-11-10', 'salary');
+  const sv = savedInPeriod(s, p, '2026-11-10');
+  assert.deepEqual([sv.income, sv.expense, sv.planned, sv.net, sv.rate], [200000, 10000, 5000, 185000, 925]);
+  // periodo senza movimenti, con un programmato da pagare: −50,00 €, tasso 0 (entrate 0)
+  const empty = savedInPeriod(s, { from: '2026-11-15', to: '2026-11-25' }, '2026-11-10');
+  assert.deepEqual([empty.income, empty.expense, empty.planned, empty.net, empty.rate], [0, 0, 5000, -5000, 0]);
+});
+
 test('v6 E6: resta 500,00 − 250,00 − 75,00 = 175,00 €, usato 65,0 %, oggi 17,50 € (10 giorni)', () => {
   const { store } = e6();
   const s = store.getState();

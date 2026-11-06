@@ -1,5 +1,6 @@
 // Home: quanto ti resta (v5: sul budget complessivo), promemoria backup, pagamenti programmati con Da confermare,
-// quanto metti da parte (v5), scorciatoie (Chi mi deve, budget superati). ⚙ porta alle Impostazioni.
+// quanto metti da parte (v5; v7 meno i programmati da pagare), scorciatoie (Chi mi deve, budget superati).
+// ⚙ porta alle Impostazioni (lo crea ctx.header, uguale nelle 5 schede dalla v7).
 // UX v6 (proposte 1–10, approvate in prova): solo disposizione e aspetto, calcoli invariati.
 
 import { el, card, icon, emptyState, button, list, row } from '../ui.js';
@@ -17,10 +18,8 @@ export function render(root, ctx) {
   const { store } = ctx;
   const state = store.getState();
   const today = ctx.today();
-  ctx.header({
-    title: 'Home',
-    actions: [el('a', { class: 'topbar__btn topbar__btn--circle', href: '#impostazioni', id: 'settings-btn', attrs: { 'aria-label': 'Impostazioni' } }, icon('gear'))],
-  });
+  // ⚙︎ in alto a destra lo mette ctx.header, uguale nelle 5 schede (v7).
+  ctx.header({ title: 'Home' });
 
   if (store.corrupted) {
     root.append(card({ title: 'Dati non leggibili', cls: 'card--warn' },
@@ -71,13 +70,16 @@ export function render(root, ctx) {
   // prossimo pagamento, altrimenti l'invito ad aggiungerne uno.
   root.append(scheduledCard(ctx, state, today));
 
-  // Quanto metti da parte (decisione v5 §2, UX v6 proposta 5): entrate − uscite del periodo accanto al titolo,
-  // sotto obiettivi e spostato verso deposito e investimenti; tocco → Statistiche. Nascosta senza movimenti nel
-  // periodo. Tono calmo: negativo nel colore del testo, nessun avviso.
-  const sv = savedInPeriod(state, p);
-  if (sv.income > 0 || sv.expense > 0) {
+  // Quanto metti da parte (decisione v5 §2, UX v6 proposta 5; v7, decisione v7 §3): stima a fine periodo =
+  // entrate − uscite − uscite programmate ancora da pagare nel periodo, accanto al titolo; sotto, prima "di cui X €
+  // di pagamenti programmati ancora da uscire", poi la % delle entrate (sul nuovo numero), obiettivi e spostato
+  // verso deposito e investimenti; tocco → Statistiche. Nascosta se il periodo non ha movimenti né programmati da
+  // pagare. Tono calmo: negativo nel colore del testo, nessun avviso.
+  const sv = savedInPeriod(state, p, today);
+  if (sv.income > 0 || sv.expense > 0 || sv.planned > 0) {
     const goalsLabel = p.mode === 'salary' ? `negli obiettivi di ${MONTHS[parseISO(p.from).m - 1]}` : 'negli obiettivi';
     const parts = [];
+    if (sv.planned > 0) parts.push(el('span', { id: 'home-saved-planned', text: `di cui ${formatEuro(sv.planned)} di pagamenti programmati ancora da uscire` }));
     if (sv.income > 0 && sv.net >= 0) parts.push(el('span', { id: 'home-saved-rate', text: `${formatPercent(sv.rate)} delle entrate` }));
     parts.push(el('span', { id: 'home-saved-goals', text: `${formatEuro(sv.goals)} ${goalsLabel}` }));
     parts.push(el('span', { id: 'home-saved-moved', text: `${formatEuro(sv.moved)} verso deposito e investimenti` }));

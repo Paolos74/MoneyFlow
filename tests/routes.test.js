@@ -23,7 +23,7 @@ test('rotte delle versioni precedenti (CONTESTO): vista o reindirizzamento', () 
     '#conti/abc': ['conto', 'conti'],
     '#obiettivi/abc': ['obiettivo', 'budget'],
   };
-  for (const s of ['tema', 'categorie', 'budget', 'backup', 'csv', 'sync', 'installa']) views[`#impostazioni/${s}`] = ['impostazioni', 'home'];
+  for (const s of ['tema', 'categorie', 'backup', 'csv', 'sync', 'installa']) views[`#impostazioni/${s}`] = ['impostazioni', 'home'];
   views['#impostazioni'] = ['impostazioni', 'home'];
   for (const [hash, [name, tab]] of Object.entries(views)) assert.deepEqual(r(hash), { name, tab }, hash);
 });
@@ -46,6 +46,13 @@ test('rotte nuove della v4', () => {
   assert.deepEqual(r('#impostazioni/importa'), { name: 'impostazioni', tab: 'home' });
   assert.deepEqual(r('#da-ricevere?persona=Anna'), { name: 'da-ricevere', tab: 'home' });
   assert.deepEqual(r('#movimenti?vista=calendario&mese=2026-03&giorno=2026-03-02'), { name: 'movimenti', tab: 'movimenti' });
+});
+
+test('v7: Impostazioni → Budget porta alla scheda Budget, con la query', () => {
+  assert.deepEqual(r('#impostazioni/budget'), { redirect: 'budget' });
+  assert.deepEqual(r('#impostazioni/budget?budget=default-uscita-spesa'), { redirect: 'budget?budget=default-uscita-spesa' });
+  assert.deepEqual(r('#budget?budget=nuovo'), { name: 'budget', tab: 'budget' });
+  assert.deepEqual(r('#impostazioni'), { name: 'impostazioni', tab: 'home' });
 });
 
 test('rotte nuove della v5: pagina dell\'ETF', () => {

@@ -1,5 +1,6 @@
 // Periodo di budget (mese di calendario o dallo stipendio), "quanto ti resta" e "puoi spendere oggi" (v4),
-// v5: rimanente sul budget complessivo, colore progressivo e "Quanto metti da parte". Funzioni pure.
+// v5: rimanente sul budget complessivo, colore progressivo e "Quanto metti da parte" (v7: meno i programmati
+// da pagare). Funzioni pure.
 
 import { monthOf, monthStart, monthEnd, addDays, diffDays, addMonthsClamped } from './dates.js';
 import * as C from './calc.js';
@@ -49,11 +50,16 @@ export function budgetPeriod(state, date, mode = 'calendar') {
 // In entrambi i modi restituzioni, trasferimenti (Compra/Vendi compresi) e variazioni non contano.
 // Puoi spendere oggi = rimanente / giorni da oggi alla fine del periodo compresi, per difetto al centesimo; 0 se ≤ 0
 // (es. 260,00 ÷ 7 giorni = 37,142… → 37,14 €).
-export function remaining(state, period, today) {
-  const t = C.totals(state, period.from, period.to);
-  const planned = C.plannedBetween(state, period.from, period.to, today)
+// Uscite programmate ancora da pagare nel periodo (v4, usate da remaining e, dalla v7, da savedInPeriod).
+function plannedExpense(state, period, today) {
+  return C.plannedBetween(state, period.from, period.to, today)
     .filter((p) => p.sched.type === 'uscita')
     .reduce((sum, p) => sum + p.sched.amount, 0);
+}
+
+export function remaining(state, period, today) {
+  const t = C.totals(state, period.from, period.to);
+  const planned = plannedExpense(state, period, today);
   const daysLeft = Math.max(1, diffDays(today, period.to) + 1);
   const perDayOf = (left) => (left > 0 ? Math.floor(left / daysLeft) : 0);
   const budget = state.categories.filter((c) => !c.deleted && c.type === 'uscita' && c.budget).reduce((s, c) => s + c.budget, 0);
@@ -80,8 +86,13 @@ export function progressStop(spentTenths) {
   return { from: 3, to: 3, mix: 0 };
 }
 
-// "Quanto metti da parte" (decisione v5 §2 e risposte 1–3):
-// - net = entrate contate − uscite contate del periodo (cash flow), rate = tasso di risparmio in decimi;
+// "Quanto metti da parte" (decisione v5 §2 e risposte 1–3; v7, decisione v7 §3):
+// - planned = uscite programmate ancora da pagare nel periodo, lo stesso insieme di remaining() (scadute "da
+//   confermare" comprese, confermate già tra le uscite, saltate escluse; entrate e trasferimenti programmati no).
+//   Senza `today` planned = 0 (calcolo della v5/v6).
+// - net = entrate contate − uscite contate − planned: stima a fine periodo di quanto metti da parte.
+//   rate = tasso di risparmio sulle entrate con le uscite + planned, in decimi (entrate 0 → 0).
+//   Statistiche e CSV restano sui soli movimenti registrati.
 // - goals = somma con segno del registro `log` degli obiettivi non eliminati nel mese in cui inizia il periodo
 //   (con il periodo dallo stipendio dal 27/10 al 26/11 conta ottobre);
 // - moved = netto spostato verso deposito e investimenti nel periodo: trasferimenti senza Compra/Vendi da un conto
@@ -89,8 +100,11 @@ export function progressStop(spentTenths) {
 //   meno Vendi ETF (euro arrivati sul conto). Compra/Vendi di crypto esclusi.
 // Es. E3: 2.000,00 + 30,00 − 240,00 = 1.790,00 €; obiettivi 150,00 + 50,00 = 200,00 €;
 //   500,00 − 100,00 + 501,00 + 281,00 − 346,99 = 835,01 €.
-export function savedInPeriod(state, period) {
+// Es. E7 (v7): E3 con oggi 21/11 e programmati Bollette 60,00 il 25/11 (futuro) e Abbonamenti 15,00 il 18/11
+//   (scaduto, da confermare) → 1.790,00 − 75,00 = 1.715,00 €, tasso 1.715 ÷ 2.030 = 84,48… → 84,5 %.
+export function savedInPeriod(state, period, today) {
   const t = C.totals(state, period.from, period.to);
+  const planned = today ? plannedExpense(state, period, today) : 0;
   const ym = monthOf(period.from);
   const goals = state.goals.filter((g) => !g.deleted).reduce((s, g) => s + (Number.isSafeInteger(g.log?.[ym]) ? g.log[ym] : 0), 0);
   const isDeposit = (id) => !!state.accounts.find((a) => a.id === id)?.deposit;
@@ -108,5 +122,5 @@ export function savedInPeriod(state, period) {
     if (toDep && !fromDep) moved += m.amountTo ?? m.amount;
     else if (fromDep && !toDep) moved -= m.amount;
   }
-  return { income: t.income, expense: t.expense, net: t.net, rate: t.rate, goals, moved };
+  return { income: t.income, expense: t.expense, planned, net: t.income - t.expense - planned, rate: C.savingsRate(t.income, t.expense + planned), goals, moved };
 }

@@ -213,6 +213,25 @@ test('fixture data-v5.json e investments-v5.json caricate identiche', () => {
   assert.ok(store.getState().accounts.every((a) => !('prices' in a)));
 });
 
+// v7: fixture generata con lo store v6 pubblicato (65e7e60), con valori crypto scritti a mano, budget, spesa divisa,
+// programmati confermati e saltati, ETF e un movimento eliminato. Dati inventati.
+test('fixture data-v6.json e investments-v6.json caricate identiche', () => {
+  const data = readFileSync(new URL('./fixtures/data-v6.json', import.meta.url), 'utf8');
+  const inv = readFileSync(new URL('./fixtures/investments-v6.json', import.meta.url), 'utf8');
+  const storage = memoryStorage({ [DATA_KEY]: data, [INVEST_KEY]: inv });
+  const store = createStore({ storage, now: clock(), uuid: seqUuid() });
+  assert.equal(store.corrupted, null);
+  const { investments, ...rest } = store.getState();
+  assert.deepEqual(rest, JSON.parse(data));
+  assert.deepEqual(investments, JSON.parse(inv).investments);
+  assert.equal(storage.getItem(DATA_KEY), data, 'il caricamento non riscrive i dati');
+  assert.equal(storage.getItem(INVEST_KEY), inv, 'il caricamento non riscrive gli ETF');
+  assert.deepEqual(store.getState().accounts.find((a) => a.asset === 'BTC').prices, [{ date: '2026-02-12', price: 6500000 }]);
+  // v7: modificando il nome di una categoria con budget (come fa il foglio categoria) il budget resta
+  store.updateCategory('default-uscita-spesa', { name: 'Spesa di casa', color: '#2563EB', type: 'uscita', role: null, icon: null });
+  assert.equal(store.getState().categories.find((c) => c.id === 'default-uscita-spesa').budget, 30000);
+});
+
 test('applyRemote: vince updatedAt più recente e notifica come remote', () => {
   const { store, eur } = base();
   const events = [];

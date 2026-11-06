@@ -10,12 +10,13 @@ import { ValidationError } from '../errors.js';
 import { PALETTE } from '../store.js';
 import * as C from '../calc.js';
 import { openMovementForm } from './movimento-form.js';
-import { amountIn } from './parts.js';
+import { amountIn, titleActions } from './parts.js';
 
 export function render(root, ctx) {
   const state = ctx.store.getState();
-  const add = el('button', { class: 'topbar__btn', type: 'button', text: 'Nuovo', id: 'conti-new', on: { click: () => openAccountForm(ctx) } });
-  ctx.header({ title: 'Conti', actions: [add] });
+  // v7: in alto a destra c'è solo ⚙︎; "Nuovo conto" sta nella riga di azioni sotto il titolo.
+  ctx.header({ title: 'Conti' });
+  root.append(titleActions(button('Nuovo conto', () => openAccountForm(ctx), { small: true, icon: 'plus', id: 'conti-new' })));
   renderAccounts(root, ctx, state);
   if (ctx.params.newAccount && !ctx.params.opened) { ctx.params.opened = true; openAccountForm(ctx); }
 }

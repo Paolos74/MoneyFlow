@@ -1,6 +1,8 @@
 // Fogli per inserire e modificare movimenti (uscita, entrata con busta paga, trasferimento, Compra/Vendi crypto,
 // restituzione, variazione quantità), programmati, conferma "Da confermare". Bozza nello stato del modulo.
 // v5: Compra/Vendi ETF con le tasse stimate, Dividendo, Aggiorna valore.
+// v7: "+ Nuova categoria" in coda alle categorie (uscita, entrata, programmato): apre il foglio categoria sopra
+// questo e la categoria creata risulta già scelta, con la bozza intatta.
 
 import { el, sheet, field, input, textarea, select, chips, segmented, toggle, stepper, toast, icon, clear, preserveFocus, button, confirmDialog, attempt } from '../ui.js';
 import { parseEuroInput, parseQtyInput, formatEuro, formatEuroSigned, formatEuroPlain, formatQtyPlain, formatQty, tradeEuroCents, parsePrice4Input, formatPrice4, formatPrice4Plain, etfTradeCents, taxCents, formatRateBp } from '../money.js';
@@ -14,6 +16,7 @@ import { formatDateIt, monthOf } from '../dates.js';
 import { FREQ_LABELS } from '../recurrence.js';
 import * as C from '../calc.js';
 import { budgetPeriod } from '../period.js';
+import { openCategoryForm } from './impostazioni.js';
 
 const TYPE_TITLES = {
   uscita: 'Uscita', entrata: 'Entrata', trasferimento: 'Trasferimento',
@@ -74,12 +77,23 @@ const peopleFrom = (split) => (split && split.length ? split.map((x) => ({ name:
 const isSalaryCat = (state, id) => state.categories.find((c) => c.id === id)?.role === 'stipendio';
 
 // Con salaryFirst la categoria con ruolo Stipendio è la prima chip delle entrate.
-function categoryChips(state, type, value, onChange, { salaryFirst = false } = {}) {
+// v7: con onNew in coda la chip "+ Nuova categoria" (id newId), che non è una scelta (niente aria-pressed).
+function categoryChips(state, type, value, onChange, { salaryFirst = false, onNew = null, newId } = {}) {
   let cats = C.sortedCategories(state, type);
   if (salaryFirst && type === 'entrata') cats = [...cats.filter((c) => c.role === 'stipendio'), ...cats.filter((c) => c.role !== 'stipendio')];
   const opts = cats.map((c) => ({ value: c.id, label: c.name, color: c.color, id: 'cat-' + c.id }));
   if (value && !opts.some((o) => o.value === value)) opts.unshift({ value, label: C.categoryLabel(state, value), color: C.categoryColor(state, value) });
-  return chips(opts, value, onChange, { wrap: true, label: 'Categoria' });
+  const group = chips(opts, value, onChange, { wrap: true, label: 'Categoria' });
+  if (onNew) group.append(el('button', { class: 'chip chip--new', type: 'button', id: newId, on: { click: onNew } }, icon('plus', 16), 'Nuova categoria'));
+  return group;
+}
+
+// "+ Nuova categoria": foglio categoria impilato con il tipo del movimento; al salvataggio la nuova categoria va
+// nella bozza e il foglio si ridisegna (importo, conto, data, descrizione e note restano nella bozza `d`).
+function newCategoryFor(ctx, d, draw) {
+  return () => openCategoryForm(ctx, null, d.type, {
+    onCreated: (id) => { d.categoryId = id; draw(); document.getElementById('cat-' + id)?.focus(); },
+  });
 }
 
 function amountInput(id, value, onInput, placeholder = '0,00') {
@@ -317,7 +331,7 @@ export function openMovementForm(ctx, opts = {}) {
     if (d.type === 'uscita' || d.type === 'entrata') {
       out.push(el('p', { class: 'field__label', text: 'Categoria' }));
       out.push(el('div', { class: 'form-group', dataset: { field: 'categoryId' } },
-        el('div', { class: 'field' }, categoryChips(state, d.type, d.categoryId, (v) => { d.categoryId = v; draw(); }, { salaryFirst: true }), el('p', { class: 'field__error', hidden: true }))));
+        el('div', { class: 'field' }, categoryChips(state, d.type, d.categoryId, (v) => { d.categoryId = v; draw(); }, { salaryFirst: true, onNew: newCategoryFor(ctx, d, draw), newId: 'f-cat-new' }), el('p', { class: 'field__error', hidden: true }))));
     }
 
     out.push(el('div', { class: 'form-group' },
@@ -1138,7 +1152,7 @@ export function openScheduledForm(ctx, opts = {}) {
     if (d.type !== 'trasferimento') {
       out.push(el('p', { class: 'field__label', text: 'Categoria' }));
       out.push(el('div', { class: 'form-group', dataset: { field: 'categoryId' } },
-        el('div', { class: 'field' }, categoryChips(state, d.type, d.categoryId, (v) => { d.categoryId = v; draw(); }), el('p', { class: 'field__error', hidden: true }))));
+        el('div', { class: 'field' }, categoryChips(state, d.type, d.categoryId, (v) => { d.categoryId = v; draw(); }, { onNew: newCategoryFor(ctx, d, draw), newId: 's-cat-new' }), el('p', { class: 'field__error', hidden: true }))));
     }
     const freqOpts = Object.entries(FREQ_LABELS).map(([value, label]) => ({ value, label }));
     const rep = [
