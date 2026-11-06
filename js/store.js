@@ -3,7 +3,7 @@
 
 import { ValidationError, StorageError } from './errors.js';
 import { isValidISO, monthOf } from './dates.js';
-import { formatEuro } from './money.js';
+import { formatEuro, formatQty, QTY_UNIT } from './money.js';
 import { PICK_ICONS } from './icons.js';
 
 export { ValidationError, StorageError };
@@ -11,6 +11,8 @@ export { ValidationError, StorageError };
 export const APP = 'MoneyFlow';
 export const SCHEMA_VERSION = 1;
 export const DATA_KEY = 'moneyflow:data';
+// ETF (v5): chiave nuova e separata, così una scheda ancora in v4 che salva `moneyflow:data` non li cancella.
+export const INVEST_KEY = 'moneyflow:investments';
 
 export const PALETTE = [
   '#0F9D58', '#2563EB', '#D97706', '#DC2626', '#7C3AED', '#DB2777',
@@ -24,7 +26,11 @@ export const KINDS = {
   movement: 'movements',
   scheduled: 'scheduled',
   goal: 'goals',
+  investment: 'investments',
 };
+
+// Raccolte salvate in `moneyflow:data` (quelle della v1–v4); `investments` sta in INVEST_KEY.
+export const DATA_COLLECTIONS = ['accounts', 'categories', 'movements', 'scheduled', 'goals'];
 
 export const MOVEMENT_TYPES = ['uscita', 'entrata', 'trasferimento', 'restituzione', 'variazione'];
 export const SCHEDULED_TYPES = ['uscita', 'entrata', 'trasferimento'];
@@ -35,12 +41,21 @@ const DEFAULT_CATEGORIES = [
   ['uscita', 'Abbonamenti', 4], ['uscita', 'Salute', 3], ['uscita', 'Svago', 5], ['uscita', 'Ristoranti', 8],
   ['uscita', 'Regali', 6], ['uscita', 'Altro', 11],
   ['entrata', 'Stipendio', 0], ['entrata', 'Rimborsi', 6], ['entrata', 'Altro', 11],
-  ['entrata', 'Interessi', 0],
+  ['entrata', 'Interessi', 0], ['entrata', 'Dividendi', 9],
 ];
 
 // Categoria delle entrate "Interessi" dei conti deposito (v4): id fisso, creata da upsertDerived se manca.
 export const INTEREST_CATEGORY_ID = 'default-entrata-interessi';
-const DEFAULT_ROLES = { Stipendio: 'stipendio', Interessi: 'interessi' };
+// Categoria "Dividendi" degli ETF (v5, provvisoria): id fisso, creata dal foglio Dividendo se manca (dati v1–v4).
+export const DIVIDEND_CATEGORY_ID = 'default-entrata-dividendi';
+const DEFAULT_ROLES = { Stipendio: 'stipendio', Interessi: 'interessi', Dividendi: 'dividendi' };
+// Categorie con ruolo create dall'app quando servono: nome alternativo se il nome è già usato.
+const ROLE_CATEGORIES = {
+  interessi: { id: INTEREST_CATEGORY_ID, name: 'Interessi', alt: 'Interessi deposito', color: PALETTE[0], order: 13 },
+  dividendi: { id: DIVIDEND_CATEGORY_ID, name: 'Dividendi', alt: 'Dividendi ETF', color: PALETTE[9], order: 14 },
+};
+export const TAX_REGIMES = ['amministrato', 'dichiarativo'];
+export const DEFAULT_TAX_RATE_BP = 2600;
 
 export function emptyData() {
   return { app: APP, schemaVersion: SCHEMA_VERSION, accounts: [], categories: [], movements: [], scheduled: [], goals: [] };
@@ -218,6 +233,95 @@ function refundedBy(state, expenseId, person, exceptId) {
 
 const splitSum = (split) => (split || []).reduce((t, x) => t + x.amount, 0);
 
+// ---- ETF (v5) ----
+// Valori di 1 quota scritti a mano ("Aggiorna valore"): [{ date, price }] con price in unità da 1e-4 €,
+// ordinati per data, una sola voce per data (l'ultima scritta vince).
+function cleanPrices(v) {
+  if (v === null || v === undefined) return [];
+  if (!Array.isArray(v)) fail('Valori non validi', 'price');
+  const byDate = new Map();
+  for (const p of v) {
+    if (!isObj(p)) fail('Valore non valido (es. 58,50)', 'price');
+    const date = cleanDate(p.date, 'date');
+    byDate.set(date, { date, price: cleanInt(p.price, 'price', { min: 1, label: 'Valore' }) });
+  }
+  return [...byDate.values()].sort((a, b) => a.date.localeCompare(b.date));
+}
+
+const cleanRegime = (v) => (v === 'dichiarativo' ? 'dichiarativo' : 'amministrato');
+
+// Compra/Vendi dello stesso ETF nell'ordine in cui contano: data, poi momento di creazione.
+const etfOpOrder = (a, b) => a.date.localeCompare(b.date) || (a.createdAt ?? Infinity) - (b.createdAt ?? Infinity);
+const etfDelta = (m) => (m.trade === 'compra' ? m.amountTo : m.trade === 'vendi' ? -m.amount : 0);
+
+// Risposta 7 dell'utente: una vendita non può superare le quote possedute a quella data, né far scendere
+// sotto zero le quote in una data successiva (vendita retrodatata). N = il minimo delle quote possedute
+// dalla posizione della vendita in poi, calcolato senza la vendita stessa.
+function checkEtfSale(state, rec, prev) {
+  const ops = state.movements
+    .filter((m) => !m.deleted && m.etfId === rec.etfId && m.type === 'trasferimento' && m.id !== prev?.id && (m.trade === 'compra' || m.trade === 'vendi'))
+    .map((m) => ({ date: m.date, createdAt: m.createdAt, delta: etfDelta(m), self: false }));
+  ops.push({ date: rec.date, createdAt: prev ? prev.createdAt : Infinity, delta: 0, self: true });
+  ops.sort(etfOpOrder);
+  let qty = 0;
+  let available = null;
+  for (const op of ops) {
+    qty += op.delta;
+    if (op.self) available = qty;
+    else if (available !== null) available = Math.min(available, qty);
+  }
+  if (rec.amount > available) {
+    const n = Math.max(0, available);
+    fail(`Puoi vendere al massimo ${formatQty(n)} ${n === QTY_UNIT ? 'quota' : 'quote'}`, 'amount');
+  }
+}
+
+// Movimenti collegati a un ETF (`etfId`): Compra/Vendi (trasferimento con `trade`) e dividendo (entrata).
+// Compra: dal conto in euro (accountId) all'ETF (toAccountId = etfId), amount = euro pagati, amountTo = quote.
+// Vendi: dall'ETF (accountId = etfId) al conto in euro, amount = quote, amountTo = euro arrivati sul conto
+// (al netto della tassa trattenuta in regime Amministrato), tax = tassa (trattenuta o da pagare).
+// price = prezzo di 1 quota in unità da 1e-4 €. Un telefono in v4 vede il saldo in euro giusto e ignora l'ETF.
+function etfMovement(input, prev, state, rec) {
+  const etf = (state.investments || []).find((x) => x.id === input.etfId);
+  if (!etf || (etf.deleted && input.etfId !== prev?.etfId)) fail('Scegli un ETF', 'etfId');
+  rec.etfId = input.etfId;
+  rec.taxRegime = cleanRegime(input.taxRegime);
+  const eurRef = (id, prevId, field) => {
+    const a = checkRef(state.accounts, id, prevId, field, 'un conto in euro');
+    if (a && a.kind !== 'eur') fail('Scegli un conto in euro', field);
+    return id;
+  };
+  if (rec.type === 'trasferimento') {
+    if (input.trade !== 'compra' && input.trade !== 'vendi') fail('Operazione non valida', 'trade');
+    rec.trade = input.trade;
+    rec.price = cleanInt(input.price, 'price', { min: 1, label: 'Prezzo' });
+    if (rec.trade === 'compra') {
+      rec.accountId = eurRef(input.accountId, prev?.accountId, 'accountId');
+      if (input.toAccountId !== rec.etfId) fail('Compra: dal conto in euro all\'ETF', 'toAccountId');
+      rec.toAccountId = rec.etfId;
+      rec.amountTo = cleanInt(input.amountTo, 'amountTo', { min: 1, label: 'Quote' });
+      rec.tax = null;
+    } else {
+      if (input.accountId !== rec.etfId) fail('Vendi: dall\'ETF al conto in euro', 'accountId');
+      rec.accountId = rec.etfId;
+      rec.toAccountId = eurRef(input.toAccountId, prev?.toAccountId, 'toAccountId');
+      rec.amountTo = cleanInt(input.amountTo ?? 0, 'amountTo', { min: 0, label: 'Importo' });
+      rec.tax = cleanInt(input.tax ?? 0, 'tax', { min: 0, label: 'Tasse' });
+      checkEtfSale(state, rec, prev);
+    }
+    return rec;
+  }
+  if (rec.type === 'entrata') {
+    rec.accountId = eurRef(input.accountId, prev?.accountId, 'accountId');
+    const cat = checkRef(state.categories, input.categoryId, prev?.categoryId, 'categoryId', 'una categoria');
+    if (cat && cat.type !== 'entrata') fail('Scegli una categoria di entrata', 'categoryId');
+    rec.categoryId = input.categoryId;
+    rec.tax = input.tax === null || input.tax === undefined ? null : cleanInt(input.tax, 'tax', { min: 0, label: 'Tasse' });
+    return rec;
+  }
+  return fail('Movimento ETF non valido', 'type');
+}
+
 const VALIDATORS = {
   account(input, prev, state) {
     const kind = input.kind === 'crypto' ? 'crypto' : input.kind === 'eur' ? 'eur' : fail('Scegli il tipo di conto', 'kind');
@@ -252,7 +356,7 @@ const VALIDATORS = {
       type,
       color: cleanColor(input.color),
       budget: null,
-      role: input.role === 'stipendio' || input.role === 'interessi' ? input.role : null,
+      role: ['stipendio', 'interessi', 'dividendi'].includes(input.role) ? input.role : null,
       order: Number.isSafeInteger(input.order) ? input.order : 0,
       icon: cleanIcon(input.icon),
     };
@@ -290,7 +394,9 @@ const VALIDATORS = {
       scheduledId: typeof input.scheduledId === 'string' ? input.scheduledId : null,
       occurrence: isValidISO(input.occurrence) ? input.occurrence : null,
       split: null, person: null, interest: null, align: null, importKey: null,
+      etfId: null, tax: null, taxRegime: null,
     };
+    if (typeof input.etfId === 'string' && input.etfId) return etfMovement(input, prev, state, rec);
     const acc = checkRef(state.accounts, input.accountId, prev?.accountId, 'accountId', 'un conto');
     rec.accountId = input.accountId;
     if (acc && ['uscita', 'entrata', 'restituzione'].includes(type) && acc.kind !== 'eur') {
@@ -427,52 +533,121 @@ const VALIDATORS = {
     uniqueName(state.goals, { ...rec, id: prev?.id });
     return rec;
   },
+
+  // ETF (v5): nome, ISIN o sigla facoltativi, aliquota (punti base, predefinita 26 %), regime, valori scritti a mano.
+  investment(input, prev, state) {
+    const code = typeof input.code === 'string' ? input.code.trim().toUpperCase() : '';
+    if (code && !/^[A-Z0-9.-]{1,20}$/.test(code)) fail('Solo lettere, numeri, punto e trattino (massimo 20)', 'code');
+    const rate = input.taxRateBp ?? DEFAULT_TAX_RATE_BP;
+    if (!Number.isSafeInteger(rate) || rate < 0 || rate > 10000) fail("Scrivi un'aliquota tra 0 e 100 (es. 26)", 'taxRateBp');
+    const rec = {
+      name: cleanName(input.name),
+      code: code || null,
+      color: cleanColor(input.color),
+      order: Number.isSafeInteger(input.order) ? input.order : 0,
+      taxRateBp: rate,
+      taxRegime: cleanRegime(input.taxRegime),
+      prices: cleanPrices(input.prices),
+    };
+    const n = lower(rec.name);
+    if ((state.investments || []).some((x) => !x.deleted && x.id !== prev?.id && lower(x.name) === n)) fail('Esiste già un ETF con questo nome', 'name');
+    return rec;
+  },
 };
 
-const cloneState = (s) => ({ ...s, accounts: [...s.accounts], categories: [...s.categories], movements: [...s.movements], scheduled: [...s.scheduled], goals: [...s.goals] });
+const cloneState = (s) => ({ ...s, accounts: [...s.accounts], categories: [...s.categories], movements: [...s.movements], scheduled: [...s.scheduled], goals: [...s.goals], investments: [...(s.investments || [])] });
+
+const validRecords = (list) => list.filter((r) => isObj(r) && typeof r.id === 'string' && r.id);
 
 // Normalizza un dato letto (localStorage o backup) senza scartare campi sconosciuti.
-export function normalizeData(raw) {
+// `collections`: per `moneyflow:data` solo le 5 raccolte v1–v4; per un backup anche `investments` (v5).
+export function normalizeData(raw, collections = Object.values(KINDS)) {
   if (!isObj(raw) || raw.app !== APP) return null;
   const out = { ...raw };
-  for (const col of Object.values(KINDS)) {
+  for (const col of collections) {
     const list = raw[col] === undefined ? [] : raw[col];
     if (!Array.isArray(list)) return null;
-    out[col] = list.filter((r) => isObj(r) && typeof r.id === 'string' && r.id);
+    out[col] = validRecords(list);
   }
   if (!Number.isSafeInteger(out.schemaVersion)) out.schemaVersion = SCHEMA_VERSION;
   // Punto di migrazione: qui si convertiranno le versioni vecchie quando lo schema cambierà.
   return out;
 }
 
-export function createStore({ storage, now = () => Date.now(), uuid = () => crypto.randomUUID(), key = DATA_KEY } = {}) {
+export function createStore({ storage, now = () => Date.now(), uuid = () => crypto.randomUUID(), key = DATA_KEY, investKey = INVEST_KEY } = {}) {
   let state;
   let corrupted = null;
+  // ETF letti da un `moneyflow:data` vecchio (backup v5 importato in una v4) e non ancora scritti nella chiave nuova.
+  let investPending = false;
   const listeners = new Set();
 
-  function persist(next) {
+  // `moneyflow:data` senza `investments`, come lo scrive la v4.
+  const dataOf = (s) => { const { investments, ...rest } = s; return rest; };
+  const investOf = (s) => ({ app: APP, schemaVersion: SCHEMA_VERSION, investments: s.investments || [] });
+
+  // Salva solo le chiavi toccate (`keys` della modifica; null = tutto). Se la seconda scrittura fallisce
+  // si rimette il valore precedente della prima: lo stato resta invariato e arriva StorageError.
+  function persist(next, keys = null) {
+    const inv = keys === null || investPending || keys.some((k) => k.startsWith('investment_'));
+    const data = keys === null || keys.some((k) => !k.startsWith('investment_'));
+    let before = null;
     try {
-      storage.setItem(key, JSON.stringify(next));
+      if (data) {
+        if (inv) { try { before = storage.getItem(key); } catch { before = null; } }
+        storage.setItem(key, JSON.stringify(dataOf(next)));
+      }
     } catch (e) {
       throw new StorageError();
     }
+    try {
+      if (inv) storage.setItem(investKey, JSON.stringify(investOf(next)));
+    } catch (e) {
+      if (data) {
+        try { if (before === null) storage.removeItem(key); else storage.setItem(key, before); } catch { /* resta il valore nuovo: si ricarica alla prossima apertura */ }
+      }
+      throw new StorageError();
+    }
+    if (inv) investPending = false;
+  }
+
+  function loadInvestments(legacy) {
+    let raw = null;
+    try { raw = storage.getItem(investKey); } catch { raw = null; }
+    if (raw === null) {
+      if (Array.isArray(legacy)) { investPending = true; return validRecords(legacy); }
+      return [];
+    }
+    try {
+      const o = JSON.parse(raw);
+      if (isObj(o) && o.app === APP && Array.isArray(o.investments)) return validRecords(o.investments);
+    } catch { /* sotto: copia grezza e ripartenza */ }
+    const ck = `${investKey}:corrupt-${now()}`;
+    try { storage.setItem(ck, raw); } catch { /* niente spazio: il valore resta sotto la chiave originale fino al prossimo salvataggio */ }
+    corrupted = ck;
+    return [];
   }
 
   function load() {
+    investPending = false;
     let raw = null;
     try { raw = storage.getItem(key); } catch { raw = null; }
     if (raw === null) {
-      state = defaultData();
-      try { persist(state); } catch { /* resta in memoria finché non c'è spazio */ }
+      state = { ...defaultData(), investments: loadInvestments(null) };
+      try { storage.setItem(key, JSON.stringify(dataOf(state))); } catch { /* resta in memoria finché non c'è spazio */ }
       return;
     }
     let parsed = null;
-    try { parsed = normalizeData(JSON.parse(raw)); } catch { parsed = null; }
-    if (parsed) { state = parsed; return; }
+    try { parsed = normalizeData(JSON.parse(raw), DATA_COLLECTIONS); } catch { parsed = null; }
+    if (parsed) {
+      const legacy = parsed.investments;
+      delete parsed.investments;
+      state = { ...parsed, investments: loadInvestments(legacy) };
+      return;
+    }
     const ck = `${key}:corrupt-${now()}`;
     try { storage.setItem(ck, raw); } catch { /* niente spazio: il valore resta comunque sotto la chiave originale fino al prossimo salvataggio */ }
     corrupted = ck;
-    state = defaultData();
+    state = { ...defaultData(), investments: loadInvestments(null) };
   }
 
   function notify(keys, source) {
@@ -480,7 +655,7 @@ export function createStore({ storage, now = () => Date.now(), uuid = () => cryp
   }
 
   function commit(next, keys, source = 'local') {
-    persist(next);
+    persist(next, keys);
     state = next;
     notify(keys, source);
   }
@@ -612,24 +787,50 @@ export function createStore({ storage, now = () => Date.now(), uuid = () => cryp
   // records: [{ id, input, deleted }]. Un record da eliminare che esiste viene solo marcato deleted (contenuto invariato);
   // un record nuovo già eliminato si crea solo se valido (rettifiche con importo 0).
   // Nessun salvataggio e nessuna notifica se nulla cambia: così chi lo chiama da subscribe non crea cicli.
+  // Categoria con ruolo (Interessi v4, Dividendi v5) con id fisso: creata se manca (nome alternativo se il nome
+  // è già usato da un'altra entrata), ripristinata se eliminata. Restituisce le chiavi toccate.
+  function ensureRoleCategory(next, role) {
+    const def = ROLE_CATEGORIES[role];
+    const i = next.categories.findIndex((c) => c.id === def.id);
+    if (i < 0) {
+      const t = now();
+      const clash = next.categories.some((c) => !c.deleted && c.type === 'entrata' && lower(c.name) === lower(def.name));
+      next.categories.push({
+        id: def.id, createdAt: t, updatedAt: t, deleted: false, name: clash ? def.alt : def.name,
+        type: 'entrata', color: def.color, budget: null, role, order: def.order, icon: null,
+      });
+      return [`category_${def.id}`];
+    }
+    if (next.categories[i].deleted) {
+      next.categories[i] = { ...next.categories[i], deleted: false, updatedAt: stamp(next.categories[i]) };
+      return [`category_${def.id}`];
+    }
+    return [];
+  }
+
+  // Foglio Dividendo (v5): assicura la categoria Dividendi; nessun salvataggio se c'è già.
+  function ensureDividendCategory() {
+    const next = cloneState(state);
+    const keys = ensureRoleCategory(next, 'dividendi');
+    if (keys.length) commit(next, keys);
+    return DIVIDEND_CATEGORY_ID;
+  }
+
+  // "Aggiorna valore" (v5): aggiunge o sostituisce il valore di 1 quota di quella data.
+  function setInvestmentPrice(id, date, price) {
+    const etf = find('investment', id);
+    if (!etf || etf.deleted) fail('ETF non trovato');
+    if (!isValidISO(date)) fail('Data non valida', 'date');
+    if (!Number.isSafeInteger(price) || price < 1) fail('Valore non valido (es. 58,50)', 'price');
+    const prices = [...(etf.prices || []).filter((p) => p.date !== date), { date, price }];
+    return update('investment', id, { prices });
+  }
+
   function upsertDerived(records, { ensureCategory = false } = {}) {
     const next = cloneState(state);
     const keys = [];
     const t = now();
-    if (ensureCategory) {
-      const i = next.categories.findIndex((c) => c.id === INTEREST_CATEGORY_ID);
-      if (i < 0) {
-        const clash = next.categories.some((c) => !c.deleted && c.type === 'entrata' && lower(c.name) === 'interessi');
-        next.categories.push({
-          id: INTEREST_CATEGORY_ID, createdAt: t, updatedAt: t, deleted: false, name: clash ? 'Interessi deposito' : 'Interessi',
-          type: 'entrata', color: PALETTE[0], budget: null, role: 'interessi', order: DEFAULT_CATEGORIES.length - 1, icon: null,
-        });
-        keys.push(`category_${INTEREST_CATEGORY_ID}`);
-      } else if (next.categories[i].deleted) {
-        next.categories[i] = { ...next.categories[i], deleted: false, updatedAt: stamp(next.categories[i]) };
-        keys.push(`category_${INTEREST_CATEGORY_ID}`);
-      }
-    }
+    if (ensureCategory) keys.push(...ensureRoleCategory(next, 'interessi'));
     for (const { id, input, deleted = false } of records) {
       const i = next.movements.findIndex((m) => m.id === id);
       const prev = i >= 0 ? next.movements[i] : null;
@@ -755,9 +956,9 @@ export function createStore({ storage, now = () => Date.now(), uuid = () => cryp
     confirmAll: (id, dates) => confirmMany(id, dates.map((date) => ({ date }))),
     skipOccurrence: (id, date) => setHandled(id, date, 'saltato'),
     unhandleOccurrence: (id, date) => setHandled(id, date, null),
-    adjustGoal, allocateGoals, upsertDerived, addMovements, settlePerson,
+    adjustGoal, allocateGoals, upsertDerived, addMovements, settlePerson, ensureDividendCategory, setInvestmentPrice,
   };
-  for (const kind of ['Account', 'Category', 'Movement', 'Scheduled', 'Goal']) {
+  for (const kind of ['Account', 'Category', 'Movement', 'Scheduled', 'Goal', 'Investment']) {
     const k = kind.toLowerCase();
     api['add' + kind] = (input) => add(k, input);
     api['update' + kind] = (id, patch) => update(k, id, patch);

@@ -1,8 +1,11 @@
 // Fogli per inserire e modificare movimenti (uscita, entrata con busta paga, trasferimento, Compra/Vendi crypto,
 // restituzione, variazione quantità), programmati, conferma "Da confermare". Bozza nello stato del modulo.
+// v5: Compra/Vendi ETF con le tasse stimate, Dividendo, Aggiorna valore.
 
 import { el, sheet, field, input, textarea, select, chips, segmented, toggle, stepper, toast, icon, clear, preserveFocus, button, confirmDialog, attempt } from '../ui.js';
-import { parseEuroInput, parseQtyInput, formatEuro, formatEuroSigned, formatEuroPlain, formatQtyPlain, formatQty, tradeEuroCents } from '../money.js';
+import { parseEuroInput, parseQtyInput, formatEuro, formatEuroSigned, formatEuroPlain, formatQtyPlain, formatQty, tradeEuroCents, parsePrice4Input, formatPrice4, formatPrice4Plain, etfTradeCents, taxCents, formatRateBp } from '../money.js';
+import { etfOf, etfLabel, sellTax, heldAt, qtyText, etfSummary, etfUnitValue } from '../invest.js';
+import { DIVIDEND_CATEGORY_ID } from '../store.js';
 import { ValidationError } from '../errors.js';
 import { extractPdfLines, PdfReadError } from '../pdf-text.js';
 import { parsePayslipLines } from '../payslip.js';
@@ -136,6 +139,12 @@ export async function writeOffCredit(ctx, expense) {
  * opts: { movement } per modificare; { preset } per un nuovo; { confirm: { sched, date } } per confermare.
  */
 export function openMovementForm(ctx, opts = {}) {
+  // v5: Compra/Vendi ETF e dividendi hanno i loro fogli.
+  if (opts.movement && opts.movement.etfId) {
+    const m = opts.movement;
+    if (m.type === 'trasferimento') return openEtfTradeForm(ctx, { etfId: m.etfId, movement: m });
+    if (m.type === 'entrata') return openDividendForm(ctx, { etfId: m.etfId, movement: m });
+  }
   // Compra/Vendi crypto hanno il loro foglio (quantità × prezzo).
   if (opts.movement && C.isTrade(opts.movement)) return openTradeForm(ctx, { movement: opts.movement });
   // Interessi e rettifiche del deposito (v4) sono calcolati dall'app: sola lettura, nessun Elimina.
@@ -668,6 +677,328 @@ export function openTradeForm(ctx, { side = 'compra', cryptoAccountId = null, mo
   });
   if (!editing) setTimeout(() => document.getElementById('t-qty')?.focus(), 0);
   return api;
+}
+
+// ---- ETF (v5) ----
+// Compra/Vendi ETF (design §8.2): quote × prezzo di 1 quota (4 decimali) = importo, calcolato ma modificabile
+// (commissioni). In Vendi la tassa stimata con sellTax: regime Amministrato → campo "Tasse trattenute" modificabile
+// e tolto dall'importo che arriva sul conto; Dichiarativo → l'importo arriva lordo e la tassa va in Tasse da pagare.
+// Il regime è quello salvato sul movimento (P6): cambiarlo sull'ETF non riscrive le vendite passate.
+export function openEtfTradeForm(ctx, { side = 'compra', etfId, movement = null } = {}) {
+  const { store } = ctx;
+  const state0 = store.getState();
+  const editing = movement;
+  const etf0 = etfOf(state0, etfId);
+  const d = (() => {
+    if (editing) {
+      const buy = editing.trade === 'compra';
+      const regime = editing.taxRegime === 'dichiarativo' ? 'dichiarativo' : 'amministrato';
+      const qty = buy ? editing.amountTo : editing.amount;
+      // L'importo della vendita non è salvato: arrivato sul conto + tassa trattenuta (Amministrato).
+      const amount = buy ? editing.amount : (editing.amountTo || 0) + (regime === 'amministrato' ? (editing.tax || 0) : 0);
+      const tax = editing.tax || 0;
+      const est = buy ? null : sellTax(state0, etfId, { qty, proceeds: amount, date: editing.date, exceptId: editing.id });
+      return {
+        side: editing.trade, regime, eurId: buy ? editing.accountId : editing.toAccountId,
+        qtyText: formatQtyPlain(qty), priceText: formatPrice4Plain(editing.price), amountText: formatEuroPlain(amount),
+        amountEdited: amount !== etfTradeCents(qty, editing.price), taxText: formatEuroPlain(tax), taxEdited: !buy && regime === 'amministrato' && tax !== est.tax,
+        date: editing.date, description: editing.description || '', note: editing.note || '', savedTax: tax,
+      };
+    }
+    const eur = C.sortedAccounts(state0).find((a) => a.kind === 'eur');
+    return {
+      side, regime: etf0?.taxRegime === 'dichiarativo' ? 'dichiarativo' : 'amministrato', eurId: eur?.id || '', qtyText: '', priceText: '', amountText: '',
+      amountEdited: false, taxText: '', taxEdited: false, date: ctx.today(), description: '', note: '', savedTax: null,
+    };
+  })();
+  // Valori all'apertura: in Dichiarativo la tassa salvata resta finché quote, prezzo, importo e data non cambiano.
+  const base = { qtyText: d.qtyText, priceText: d.priceText, amountText: d.amountText, date: d.date };
+  const changed = () => !editing || Object.keys(base).some((k) => d[k] !== base[k]);
+  let body;
+  const draw = () => preserveFocus(() => { clear(body); body.append(...build()); });
+  const exceptId = editing ? editing.id : null;
+
+  function calc() {
+    const state = store.getState();
+    const q = parseQtyInput(d.qtyText);
+    const p = parsePrice4Input(d.priceText);
+    const cents = q && p ? etfTradeCents(q, p) : null;
+    const amount = d.amountEdited ? parseEuroInput(d.amountText) : cents;
+    const sell = d.side === 'vendi';
+    const est = sell && q && amount !== null && amount !== undefined ? sellTax(state, etfId, { qty: q, proceeds: amount, date: d.date, exceptId }) : null;
+    let tax = 0;
+    if (sell && d.regime === 'amministrato') tax = d.taxEdited ? (d.taxText.trim() ? parseEuroInput(d.taxText) : 0) : est ? est.tax : 0;
+    if (sell && d.regime === 'dichiarativo') tax = !changed() ? d.savedTax : est ? est.tax : 0;
+    return { q, p, cents, amount, est, tax };
+  }
+  const calcText = (c) => {
+    if (!c.q || !c.p) return 'Scrivi quote e prezzo: l\'importo si calcola da solo.';
+    if (c.cents === null) return 'Quote o prezzo troppo grandi';
+    return `Calcolato: ${qtyText(c.q)} × ${formatPrice4(c.p)} = ${formatEuro(c.cents)}. ${d.side === 'compra' ? 'Aggiungi' : 'Togli'} le commissioni, se ci sono.`;
+  };
+  const gainText = (c) => {
+    if (!c.est) return 'Scrivi quote e prezzo: la tassa si calcola da sola.';
+    const head = `Prezzo medio ${formatPrice4(c.est.avgPrice4)} · costo delle ${qtyText(Math.min(c.q, c.est.held))} ${formatEuro(c.est.costSold)}`;
+    if (c.est.gain < 0) return `${head} · minusvalenza ${formatEuro(-c.est.gain)}: nessuna tassa, va nello zainetto fiscale fino al ${formatDateIt(c.est.expires)}.`;
+    return `${head} · plusvalenza ${formatEuro(c.est.gain)}`;
+  };
+  const netText = (c) => {
+    if (c.amount === null || c.amount === undefined) return 'Arriva sul conto: —';
+    return `Arriva sul conto: ${formatEuro(d.regime === 'amministrato' ? c.amount - (c.tax || 0) : c.amount)}`;
+  };
+  const headText = () => {
+    const state = store.getState();
+    const e = etfOf(state, etfId);
+    const code = e?.code ? ` (${e.code})` : '';
+    return `ETF: ${etfLabel(state, etfId)}${code}${d.side === 'vendi' ? ` · possiedi ${qtyText(heldAt(state, etfId, d.date, exceptId))}` : ''}`;
+  };
+  const setText = (id, text) => { const n = document.getElementById(id); if (n) n.textContent = text; };
+  // Ricalcolo dal vivo senza ridisegnare (finché importo e tasse non sono stati corretti a mano).
+  function refresh() {
+    const c = calc();
+    if (!d.amountEdited) {
+      d.amountText = c.cents !== null && c.cents !== undefined ? formatEuroPlain(c.cents) : '';
+      const n = document.getElementById('q-amount');
+      if (n) n.value = d.amountText;
+    }
+    if (d.side === 'vendi' && d.regime === 'amministrato' && !d.taxEdited) {
+      d.taxText = c.est ? formatEuroPlain(c.tax) : '';
+      const n = document.getElementById('q-tax');
+      if (n) n.value = d.taxText;
+    }
+    const c2 = calc();
+    setText('q-calc', calcText(c2));
+    setText('q-gain', gainText(c2));
+    setText('q-net', netText(c2));
+    setText('q-due', `Tassa da pagare con la dichiarazione: ${formatEuro(c2.tax || 0)}`);
+    setText('q-head', headText());
+  }
+
+  function build() {
+    const state = store.getState();
+    const e = etfOf(state, etfId);
+    const buy = d.side === 'compra';
+    const c = calc();
+    const out = [];
+    if (!editing) {
+      out.push(segmented([{ value: 'compra', label: 'Compra', id: 'q-side-compra' }, { value: 'vendi', label: 'Vendi', id: 'q-side-vendi' }], d.side,
+        (v) => { d.side = v; api.setTitle(`${v === 'compra' ? 'Compra' : 'Vendi'} ${e?.name || 'ETF'}`); draw(); refresh(); }, { label: 'Compra o vendi' }));
+    }
+    out.push(el('p', { class: 'section-footer', id: 'q-head', text: headText() }));
+    out.push(el('div', { class: 'form-group' },
+      field({ label: 'Quote', field: 'qty', id: 'q-qty', hint: 'Fino a 8 decimali',
+        input: input({ id: 'q-qty', value: d.qtyText, inputmode: 'decimal', placeholder: '0', onInput: (v) => { d.qtyText = v; refresh(); } }) }),
+      field({ label: 'Prezzo di 1 quota (€)', field: 'price', id: 'q-price', hint: 'Fino a 4 decimali',
+        input: input({ id: 'q-price', value: d.priceText, inputmode: 'decimal', placeholder: '0,0000', onInput: (v) => { d.priceText = v; refresh(); } }) }),
+      field({ label: buy ? 'Importo pagato (€)' : 'Importo della vendita (€)', field: 'amount', id: 'q-amount',
+        hint: el('p', { class: 'field__hint calc calc--gold', id: 'q-calc', text: calcText(c) }),
+        input: input({ id: 'q-amount', value: d.amountText, inputmode: 'decimal', placeholder: '0,00', cls: 'input--amount', onInput: (v) => {
+          const cc = calc();
+          const was = d.amountEdited;
+          d.amountText = v;
+          d.amountEdited = !(cc.cents !== null && cc.cents !== undefined && parseEuroInput(v) === cc.cents);
+          if (was !== d.amountEdited) draw();
+          refresh();
+        } }) }),
+      d.amountEdited ? el('div', { class: 'field' }, button('Ricalcola', () => { d.amountEdited = false; refresh(); draw(); }, { kind: 'plain', small: true, id: 'q-recalc', icon: 'undo' })) : null));
+    if (!buy) {
+      out.push(el('p', { class: 'field__label', text: 'Tasse (stima)' }));
+      const g = [el('div', { class: 'field' }, el('p', { class: 'field__hint calc', id: 'q-gain', text: gainText(c) }))];
+      if (d.regime === 'amministrato') {
+        g.push(field({ label: 'Tasse trattenute (€)', field: 'tax', id: 'q-tax', hint: `Stima al ${formatRateBp(e ? e.taxRateBp : 2600)} sulla plusvalenza. Correggila con l'importo del broker.`,
+          input: input({ id: 'q-tax', value: d.taxText, inputmode: 'decimal', placeholder: '0,00', onInput: (v) => {
+            const was = d.taxEdited;
+            d.taxText = v;
+            const cc = { ...calc() };
+            const parsed = v.trim() ? parseEuroInput(v) : 0;
+            d.taxEdited = !(cc.est && parsed === cc.est.tax);
+            if (was !== d.taxEdited) draw();
+            refresh();
+          } }) }));
+        if (d.taxEdited) g.push(el('div', { class: 'field' }, button('Ricalcola', () => { d.taxEdited = false; refresh(); draw(); }, { kind: 'plain', small: true, id: 'q-tax-recalc', icon: 'undo' })));
+      }
+      out.push(el('div', { class: 'form-group' }, g));
+      out.push(el('p', { class: 'q-net', id: 'q-net', text: netText(c) }));
+      if (d.regime === 'dichiarativo') out.push(el('p', { class: 'q-due', id: 'q-due', text: `Tassa da pagare con la dichiarazione: ${formatEuro(c.tax || 0)}` }));
+    }
+    const eurOpts = C.sortedAccounts(state).filter((a) => a.kind === 'eur').map((a) => ({ value: a.id, label: a.name }));
+    if (d.eurId && !eurOpts.some((o) => o.value === d.eurId)) eurOpts.unshift({ value: d.eurId, label: C.accountLabel(state, d.eurId) });
+    out.push(el('div', { class: 'form-group' },
+      field({ label: buy ? 'Dal conto in euro' : 'Sul conto in euro', field: 'eurId', id: 'q-eur',
+        input: select({ id: 'q-eur', options: [{ value: '', label: 'Scegli…', disabled: true }, ...eurOpts], value: d.eurId, onChange: (v) => { d.eurId = v; } }) }),
+      field({ label: 'Data', field: 'date', id: 'q-date', input: input({ id: 'q-date', type: 'date', value: d.date, cls: 'input--date', onInput: (v) => { d.date = v; refresh(); } }) }),
+      field({ label: 'Descrizione', field: 'description', id: 'q-desc', input: input({ id: 'q-desc', value: d.description, maxlength: 80, placeholder: 'Facoltativa', onInput: (v) => { d.description = v; } }) })));
+    out.push(el('div', { class: 'form-group' },
+      field({ label: 'Note', field: 'note', id: 'q-note', input: textarea({ id: 'q-note', value: d.note, maxlength: 500, placeholder: 'Facoltative', onInput: (v) => { d.note = v; } }) })));
+    out.push(el('p', { class: 'section-footer', text: 'Comprare e vendere ETF non conta come spesa né come entrata. Nessun prezzo viene preso da internet.' }));
+    if (editing) {
+      out.push(el('div', { class: 'list' }, el('button', { type: 'button', class: 'row row--danger row--noicon', id: 'q-delete', text: 'Elimina movimento', on: { click: () => {
+        api.close();
+        if (attempt(() => store.deleteMovement(editing.id))) toast('Movimento eliminato', { undo: () => store.restoreMovement(editing.id) });
+      } } })));
+    }
+    return out;
+  }
+
+  function collect() {
+    const qty = parseQtyInput(d.qtyText);
+    if (!qty) throw new ValidationError(d.qtyText.trim() ? 'Quote non valide (es. 2,5)' : 'Inserisci le quote', 'qty');
+    const price = parsePrice4Input(d.priceText);
+    if (!price) throw new ValidationError(d.priceText.trim() ? 'Prezzo non valido (es. 56,1234)' : 'Inserisci il prezzo', 'price');
+    const cents = etfTradeCents(qty, price);
+    if (cents === null) throw new ValidationError('Quote o prezzo troppo grandi', 'amount');
+    const amount = d.amountEdited ? parseEuroInput(d.amountText) : cents;
+    if (!amount) throw new ValidationError(d.amountText.trim() ? 'Importo non valido (es. 501,00)' : 'Inserisci l\'importo', 'amount');
+    if (!d.eurId) throw new ValidationError('Scegli il conto in euro', 'eurId');
+    const common = { type: 'trasferimento', trade: d.side, etfId, price, date: d.date, description: d.description, note: d.note, taxRegime: d.regime };
+    if (d.side === 'compra') return { ...common, accountId: d.eurId, toAccountId: etfId, amount, amountTo: qty, tax: null };
+    const c = calc();
+    let tax = c.tax;
+    if (d.regime === 'amministrato') {
+      if (tax === null || tax === undefined || tax < 0) throw new ValidationError('Tasse non valide (es. 12,01)', 'tax');
+      if (tax > amount) throw new ValidationError('Le tasse non possono superare l\'importo della vendita', 'tax');
+    }
+    tax = tax || 0;
+    return { ...common, accountId: etfId, toAccountId: d.eurId, amount: qty, amountTo: d.regime === 'amministrato' ? amount - tax : amount, tax };
+  }
+
+  // Gli errori dello store usano i campi del movimento: si riportano sui campi del foglio.
+  const FIELD_MAP = {
+    compra: { amount: 'amount', amountTo: 'qty', accountId: 'eurId', toAccountId: 'eurId', price: 'price', date: 'date' },
+    vendi: { amount: 'qty', amountTo: 'amount', accountId: 'eurId', toAccountId: 'eurId', price: 'price', tax: 'tax', date: 'date' },
+  };
+  const name0 = etf0?.name || 'ETF';
+  const api = sheet({
+    title: editing ? (d.side === 'compra' ? 'Modifica acquisto' : 'Modifica vendita') : `${d.side === 'compra' ? 'Compra' : 'Vendi'} ${name0}`,
+    onSave: () => {
+      const inp = collect();
+      try {
+        const mov = editing ? store.updateMovement(editing.id, inp) : store.addMovement(inp);
+        toast(editing ? 'Modifiche salvate' : d.side === 'compra' ? 'Acquisto salvato' : 'Vendita salvata');
+        return mov;
+      } catch (e) {
+        if (e instanceof ValidationError && FIELD_MAP[d.side][e.field]) throw new ValidationError(e.message, FIELD_MAP[d.side][e.field]);
+        throw e;
+      }
+    },
+    content: (s) => { body = s.body; body.append(...build()); },
+  });
+  if (!editing) setTimeout(() => document.getElementById('q-qty')?.focus(), 0);
+  return api;
+}
+
+// Dividendo (design §8.3): entrata collegata all'ETF su un conto in euro, categoria Dividendi.
+// Amministrato: importo netto, nessuna tassa calcolata. Dichiarativo: importo lordo, tassa = importo × aliquota
+// dell'ETF, sommata in "Tasse da pagare". Il regime è quello salvato sul movimento (P6).
+export function openDividendForm(ctx, { etfId, movement = null } = {}) {
+  const { store } = ctx;
+  const state0 = store.getState();
+  const editing = movement;
+  const etf0 = etfOf(state0, etfId);
+  const regime = editing ? (editing.taxRegime === 'dichiarativo' ? 'dichiarativo' : 'amministrato') : etf0?.taxRegime === 'dichiarativo' ? 'dichiarativo' : 'amministrato';
+  const d = editing
+    ? { amountText: formatEuroPlain(editing.amount), eurId: editing.accountId, date: editing.date, note: editing.note || '' }
+    : { amountText: '', eurId: C.sortedAccounts(state0).find((a) => a.kind === 'eur')?.id || '', date: ctx.today(), note: '' };
+  const baseAmount = d.amountText;
+  const rateOf = () => etfOf(store.getState(), etfId)?.taxRateBp ?? 2600;
+  // In modifica, se l'importo non cambia resta la tassa salvata; altrimenti si ricalcola con l'aliquota attuale.
+  const taxOf = (amount) => (editing && d.amountText === baseAmount && editing.tax !== null && editing.tax !== undefined ? editing.tax : taxCents(amount, rateOf()));
+  const taxText = () => {
+    const a = parseEuroInput(d.amountText);
+    return a ? `Tassa da pagare: ${formatEuro(taxOf(a))} (${formatRateBp(rateOf())})` : 'Scrivi l\'importo: la tassa si calcola da sola.';
+  };
+  const api = sheet({
+    title: editing ? 'Modifica dividendo' : 'Dividendo',
+    onSave: () => {
+      const amount = parseEuroInput(d.amountText);
+      if (!amount) throw new ValidationError(d.amountText.trim() ? 'Importo non valido (es. 30,00)' : 'Inserisci l\'importo', 'amount');
+      if (!d.eurId) throw new ValidationError('Scegli il conto in euro', 'eurId');
+      const categoryId = editing ? editing.categoryId : store.ensureDividendCategory();
+      const inp = { type: 'entrata', etfId, amount, accountId: d.eurId, categoryId, date: d.date, note: d.note, description: editing?.description || '', taxRegime: regime, tax: regime === 'dichiarativo' ? taxOf(amount) : null };
+      try {
+        const mov = editing ? store.updateMovement(editing.id, inp) : store.addMovement(inp);
+        toast(editing ? 'Modifiche salvate' : 'Dividendo salvato');
+        return mov;
+      } catch (e) {
+        if (e instanceof ValidationError && e.field === 'accountId') throw new ValidationError(e.message, 'eurId');
+        throw e;
+      }
+    },
+    content: (s) => {
+      const state = store.getState();
+      const eurOpts = C.sortedAccounts(state).filter((a) => a.kind === 'eur').map((a) => ({ value: a.id, label: a.name }));
+      if (d.eurId && !eurOpts.some((o) => o.value === d.eurId)) eurOpts.unshift({ value: d.eurId, label: C.accountLabel(state, d.eurId) });
+      s.body.append(
+        el('p', { class: 'section-footer', id: 'dv-head', text: `ETF: ${etfLabel(state, etfId)}` }),
+        el('div', { class: 'form-group' },
+          field({ label: 'Importo (€)', field: 'amount', id: 'dv-amount',
+            hint: el('div', {},
+              el('p', { class: 'field__hint', text: regime === 'amministrato' ? 'Scrivi l\'importo netto arrivato sul conto: le tasse le ha già trattenute il broker.' : 'Scrivi l\'importo lordo: la tassa stimata va in Tasse da pagare.' }),
+              regime === 'dichiarativo' ? el('p', { class: 'field__hint calc', id: 'dv-tax', text: taxText() }) : null),
+            input: input({ id: 'dv-amount', value: d.amountText, inputmode: 'decimal', placeholder: '0,00', cls: 'input--amount', onInput: (v) => {
+              d.amountText = v;
+              const n = document.getElementById('dv-tax');
+              if (n) n.textContent = taxText();
+            } }) })),
+        el('div', { class: 'form-group' },
+          field({ label: 'Sul conto in euro', field: 'eurId', id: 'dv-eur', input: select({ id: 'dv-eur', options: [{ value: '', label: 'Scegli…', disabled: true }, ...eurOpts], value: d.eurId, onChange: (v) => { d.eurId = v; } }) }),
+          field({ label: 'Data', field: 'date', id: 'dv-date', input: input({ id: 'dv-date', type: 'date', value: d.date, cls: 'input--date', onInput: (v) => { d.date = v; } }) })),
+        el('div', { class: 'form-group' },
+          field({ label: 'Note', field: 'note', id: 'dv-note', input: textarea({ id: 'dv-note', value: d.note, maxlength: 500, placeholder: 'Facoltative', onInput: (v) => { d.note = v; } }) })),
+        el('p', { class: 'section-footer', text: 'Il dividendo conta come entrata, nella categoria Dividendi.' }),
+        editing ? el('div', { class: 'list' }, el('button', { type: 'button', class: 'row row--danger row--noicon', id: 'dv-delete', text: 'Elimina movimento', on: { click: () => {
+          s.close();
+          if (attempt(() => store.deleteMovement(editing.id))) toast('Movimento eliminato', { undo: () => store.restoreMovement(editing.id) });
+        } } })) : null);
+      if (!editing) setTimeout(() => document.getElementById('dv-amount')?.focus(), 0);
+    },
+  });
+  return api;
+}
+
+// Aggiorna valore (design §8.4): valore di 1 quota scritto a mano con la data (oggi o un giorno passato).
+// Annulla rimette i valori di prima (la voce di quella data torna com'era o sparisce).
+export function openEtfPriceSheet(ctx, etf) {
+  const { store } = ctx;
+  const today = ctx.today();
+  const d = { priceText: '', date: today };
+  const qty = etfSummary(store.getState(), etf.id).qty;
+  let body;
+  const calcText = () => {
+    const p = parsePrice4Input(d.priceText);
+    if (!p) return 'Scrivi il valore: il totale si calcola da solo.';
+    return `Valore totale: ${qtyText(qty)} × ${formatPrice4(p)} = ${formatEuro(qty > 0 ? etfTradeCents(qty, p) ?? 0 : 0)}`;
+  };
+  const lastText = () => {
+    const e = store.find('investment', etf.id);
+    const same = (e.prices || []).find((x) => x.date === d.date);
+    if (same) return `Sostituisce il valore del ${formatDateIt(same.date)} (${formatPrice4(same.price)})`;
+    const v = etfUnitValue(store.getState(), e);
+    if (!v) return 'Nessun valore ancora.';
+    return `Ultimo valore: ${formatPrice4(v.price4)} del ${formatDateIt(v.date)}${v.source === 'purchase' ? ' (prezzo d\'acquisto)' : ''}`;
+  };
+  const build = () => [
+    el('p', { class: 'section-footer', id: 'p-head', text: `ETF: ${etf.name} · ${qtyText(qty)}` }),
+    el('div', { class: 'form-group' },
+      field({ label: 'Valore di 1 quota (€)', field: 'price', id: 'p-price', hint: el('div', {}, el('p', { class: 'field__hint', text: 'Lo trovi nell\'app del broker.' }), el('p', { class: 'field__hint calc', id: 'p-calc', text: calcText() })),
+        input: input({ id: 'p-price', value: d.priceText, inputmode: 'decimal', placeholder: '0,0000', cls: 'input--amount', onInput: (v) => { d.priceText = v; const n = document.getElementById('p-calc'); if (n) n.textContent = calcText(); } }) }),
+      field({ label: 'Data', field: 'date', id: 'p-date', input: input({ id: 'p-date', type: 'date', value: d.date, cls: 'input--date', attrs: { max: today }, onInput: (v) => { d.date = v; const n = document.getElementById('p-last'); if (n) n.textContent = lastText(); } }) })),
+    el('p', { class: 'section-footer', id: 'p-last', text: lastText() }),
+  ];
+  return sheet({
+    title: 'Aggiorna valore',
+    onSave: () => {
+      const price = parsePrice4Input(d.priceText);
+      if (!price) throw new ValidationError(d.priceText.trim() ? 'Valore non valido (es. 58,50)' : 'Inserisci il valore', 'price');
+      if (!d.date) throw new ValidationError('Data non valida', 'date');
+      if (d.date > today) throw new ValidationError('La data non può essere nel futuro', 'date');
+      const before = (store.find('investment', etf.id).prices || []).slice();
+      store.setInvestmentPrice(etf.id, d.date, price);
+      toast('Valore aggiornato', { undo: () => store.updateInvestment(etf.id, { prices: before }) });
+      return true;
+    },
+    content: (s) => { body = s.body; body.append(...build()); setTimeout(() => document.getElementById('p-price')?.focus(), 0); },
+  });
 }
 
 function openDerivedSheet(ctx, m) {

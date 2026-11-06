@@ -1,5 +1,7 @@
 // Esportazione CSV dei movimenti: BOM, CRLF, date GG/MM/AAAA, formati ';' e ','.
 // Protezione dalle formule sulle celle di testo; importi generati dall'app.
+// v5 (formato provvisorio, punto aperto): Compra/Vendi di un ETF come "Trasferimento" con "Conto → ETF <nome>"
+// e l'importo in euro (pagato per la Compra, arrivato sul conto per la Vendi); dividendi come Entrata · Dividendi.
 
 import { formatDateIt } from './dates.js';
 import { formatEuroPlain, formatQtyPlain } from './money.js';
@@ -27,8 +29,15 @@ function textCell(v, sep) {
   return quote(s, sep);
 }
 
+function etfName(e) {
+  const s = /^etf\b/i.test(e.name) ? e.name : 'ETF ' + e.name;
+  return e.deleted ? s + ' (eliminato)' : s;
+}
+
 function accountName(state, id) {
   const a = state.accounts.find((x) => x.id === id);
+  const e = a ? null : (state.investments || []).find((x) => x.id === id);
+  if (e) return etfName(e);
   if (!a) return 'Conto sconosciuto';
   let s = a.name + (a.kind === 'crypto' ? ` (${a.asset})` : '');
   if (a.deleted) s += ' (eliminato)';
@@ -39,6 +48,7 @@ function accountName(state, id) {
 const typeLabel = (m) => (m.type === 'variazione' && m.align ? 'Rettifica saldo' : TYPE_LABELS[m.type] || m.type);
 
 function amountText(state, m) {
+  if (m.etfId && m.type === 'trasferimento') return formatEuroPlain(m.trade === 'vendi' ? m.amountTo : m.amount);
   const a = state.accounts.find((x) => x.id === m.accountId);
   const crypto = a && a.kind === 'crypto';
   // Uscite con l'importo contato (importo − quota esclusa), decisione v2 n. 6.

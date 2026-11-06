@@ -1,7 +1,7 @@
 // Service worker di MoneyFlow: cache dei file dell'app, offline, aggiornamento solo su richiesta.
 // AUMENTARE VERSION A OGNI RILASCIO e tenere ASSETS uguale ai file pubblicati.
 
-const VERSION = 'moneyflow-v4';
+const VERSION = 'moneyflow-v5';
 const ASSETS = [
   './',
   'index.html',
@@ -27,6 +27,7 @@ const ASSETS = [
   'js/firebase-config.js',
   'js/icons.js',
   'js/interest.js',
+  'js/invest.js',
   'js/money.js',
   'js/payslip.js',
   'js/pdf-text.js',
@@ -50,6 +51,7 @@ const ASSETS = [
   'js/views/da-ricevere.js',
   'js/views/fondo-pensione.js',
   'js/views/importa.js',
+  'js/views/investimento.js',
   'js/views/home.js',
   'js/views/impostazioni.js',
   'js/views/metti-da-parte.js',

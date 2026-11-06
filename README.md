@@ -2,11 +2,16 @@
 
 App personale per gestire soldi, risparmi, stipendio e spese nel tempo. Funziona nel browser e si installa sul telefono (Android e iPhone). I dati restano sul dispositivo; la sincronizzazione online con Firebase è facoltativa.
 
-Versione: **moneyflow-v4**
+Versione: **moneyflow-v5**
 
 ## Come si usa
 
-- **Home:** il numero grande è **Quanto ti resta** nel periodo di budget: entrate contate − uscite contate − uscite programmate ancora da pagare nel periodo (anche quelle scadute da confermare). Es. entrate 2.000 €, uscite 650 €, affitto programmato 300 € → **1.050,00 €**. Verde se è zero o positivo, rosso se è negativo. Sotto c'è **Puoi spendere oggi**: quanto ti resta diviso i giorni che mancano alla fine del periodo, oggi compreso (es. 1.050 € e 10 giorni → 105,00 €; 0 se sei in rosso). Poi Entrate, Uscite, Programmati e il cash flow del periodo, Da confermare e poche righe secondarie (Chi mi deve, Budget e obiettivi, Pagamenti programmati, Patrimonio).
+- **Home:** il numero grande è **Quanto ti resta** nel periodo di budget.
+  - **Con almeno un budget** (Impostazioni → Budget): somma dei budget meno **tutte** le uscite contate del periodo, anche quelle di categorie senza budget. Es. budget Spesa 300 € + Svago 200 € = 500 €; uscite Spesa 120 €, Ristoranti 80 € (senza budget), Svago 50 € con 10 € esclusi = 240 € → **260,00 €**. Il numero e l'anello cambiano colore man mano che spendi: verde all'inizio, giallo a metà, arancio verso l'85 %, rosso al 100 %. Se spendi più del budget compare **Hai sforato di X €**. Sotto, una riga grigia ti segnala con garbo le uscite in categorie senza budget (**Crea un budget**) o in "Altro" (**Scegli la categoria**).
+  - **Senza budget:** come prima, entrate − uscite − uscite programmate ancora da pagare (es. 2.000 − 650 − 300 = **1.050,00 €**), con la riga **Imposta i budget**.
+  - **Puoi spendere oggi:** quanto ti resta diviso i giorni che mancano alla fine del periodo, oggi compreso, per difetto al centesimo (260 € e 10 giorni → 26,00 €; 0 se hai sforato).
+  - **Quanto metti da parte:** entrate meno uscite del periodo (es. 2.030 € di entrate − 240 € di uscite = **+1.790,00 €**); sotto quanto hai messo **negli obiettivi** nel mese e quanto hai spostato **verso deposito e investimenti** (versato − ritirato sul deposito, più gli acquisti di ETF meno le vendite; le crypto non contano). Se è negativo è scritto in nero, senza avvisi.
+  - Poi Da confermare e poche righe secondarie (Chi mi deve, Budget e obiettivi, Pagamenti programmati, Patrimonio con gli ETF).
 - **Schede in basso:** Home, Movimenti, Budget, Statistiche, Conti. Le Impostazioni si aprono dall'icona ⚙︎ in alto a destra nella Home. I vecchi indirizzi (`#calendario`, `#conti/obiettivi`…) portano da soli alla nuova posizione.
 - **Periodo di budget:** Impostazioni → **Periodo di budget**: **Mese di calendario** (predefinito, dal 1° a fine mese) oppure **Dallo stipendio**: il periodo parte dalla data dell'ultima entrata Stipendio registrata e finisce il giorno prima dello stipendio dopo. Finché il nuovo stipendio non c'è, la fine è stimata alla stessa data del mese dopo; se lo stipendio è in ritardo il periodo arriva a oggi. Vale per Quanto ti resta, Puoi spendere oggi e i budget per categoria; Statistiche e CSV restano a mesi di calendario.
 - **Pulsante +:** registra una spesa, un'entrata o un trasferimento. In cima ci sono le **voci recenti**: toccane una, scrivi l'importo e premi **Salva** (l'importo non viene mai suggerito).
@@ -23,10 +28,10 @@ Versione: **moneyflow-v4**
 - **Leggi busta paga (PDF), sperimentale:** nel modulo tocca **Leggi busta paga (PDF)** e scegli il PDF dal telefono. Il file viene letto **solo sul telefono** (non viene salvato né inviato) e riempie i campi che trova: controllali e premi **Salva**. Se il PDF è una scansione, è protetto o ha un formato diverso, compare un messaggio e i campi si compilano a mano. Dalla v4 compila **anche il Netto a pagare** quando l'etichetta "NETTO A PAGARE" è in un modello di sfondo del PDF o scritta a lettere staccate, e sceglie l'importo vicino all'etichetta che coincide con Totale competenze − Totale ritenute (riga Ferie). Se l'etichetta non si trova, il netto è calcolato così e compare l'avviso "Netto calcolato… controllalo sulla busta". È stato provato con PDF di prova, non con una busta paga vera: provalo e controlla i numeri.
 - **Stipendio e tasse** (Statistiche → Stipendio e tasse): totali dell'anno (competenze, contributi, imponibile, IRPEF trattenuta, netto) e la **stima delle tasse**: IRPEF dovuta sull'anno con gli scaglioni 2026 e le detrazioni per lavoro dipendente rapportate ai giorni lavorati, confronto con l'IRPEF trattenuta (**Rimborso stimato** o **Da pagare stimati**) e le addizionali regionale e comunale dell'anno dopo (11 rate). I mesi che mancano valgono come la media dei mesi registrati, oppure come i valori che scrivi tu. In **Impostazioni della stima** scrivi la data di inizio rapporto, le percentuali delle addizionali (le trovi nella CU o sui siti di Regione e Comune) e, se un bonus falsa la media, l'imponibile e l'IRPEF per ogni mese mancante. **È una stima**: non sostituisce la Certificazione Unica (CU) né il 730.
 - **Se aumento il fondo pensione** (Statistiche, oppure da Stipendio e tasse; resta un collegamento in Impostazioni → Strumenti): scrivi la retribuzione base, la percentuale volontaria attuale e quella nuova; vedi quanto versi in più, quanta IRPEF risparmi, di quanto scende il netto e quanto spazio deducibile resta rispetto al limite di 5.164,57 € l'anno. I valori non vengono salvati.
-- **Budget** (scheda Budget): **Rimanente** con quanto ti resta e puoi spendere oggi, **Piano** con il budget di ogni categoria nel periodo (barra rossa se lo superi; si imposta da **Modifica** o Impostazioni → Budget) e **Andamento** con le prime categorie di spesa. Tocca un budget, o una categoria nella ciambella di Statistiche, per vedere le spese di quella categoria.
+- **Budget** (scheda Budget): **Rimanente** con quanto ti resta e puoi spendere oggi (con i budget: budget complessivo, uscite del periodo e "di cui senza budget"), **Piano** con il budget di ogni categoria nel periodo (barra rossa se lo superi; si imposta da **Modifica** o Impostazioni → Budget) e **Andamento** con le prime categorie di spesa. Tocca un budget, o una categoria nella ciambella di Statistiche, per vedere le spese di quella categoria.
 - **Obiettivi:** Budget → Obiettivi. Nome, cifra da raggiungere, **quota mensile** e scadenza (facoltative). Vedi quanto hai messo da parte questo mese rispetto alla quota (es. "30,00 € di 50,00 € questo mese"). Quando salvi un nuovo stipendio si apre **Metti da parte** con le quote già spuntate: cambia le cifre o togli le spunte e tocca **Conferma**, oppure **Salta**. I soldi restano sul conto: l'obiettivo tiene solo il conto. Raggiunta la cifra l'obiettivo diventa **Completato ✓** e passa nella sezione **Completati**; per riaprirlo alza la cifra con **Modifica** o usa **Togli**.
 
-- **Conti** (scheda Conti): in alto il **totale del patrimonio** (conti in euro e depositi), poi Conti in euro, Depositi e Crypto (solo quantità). Ogni conto e categoria ha un'**icona** che scegli nel suo foglio (Modifica).
+- **Conti** (scheda Conti): in alto il **totale del patrimonio** (conti in euro, depositi ed ETF, con la data dei valori degli ETF), poi Conti in euro, Depositi, **Investimenti** e Crypto (solo quantità). Ogni conto e categoria ha un'**icona** che scegli nel suo foglio (Modifica).
 - **Interessi** di un conto deposito: entrata nella categoria **Interessi** (contano nel cash flow, nel tasso di risparmio e in Quanto ti resta). Le rettifiche di Allinea al saldo reale non contano né come entrata né come uscita; nel CSV hanno tipo "Rettifica saldo".
 
 ## Conto deposito con interessi automatici (es. Revolut)
@@ -40,6 +45,19 @@ Versione: **moneyflow-v4**
 Da quel momento l'app calcola ogni giorno gli interessi sul saldo di fine giornata (tasso / 365, ritenuta trattenuta, i centesimi sotto 0,01 € si accumulano come fa Revolut) dalla data di inizio fino a ieri, e li aggiunge **da sola** ogni volta che apri l'app, recuperando i giorni passati. Non crea un movimento al giorno: c'è **un movimento "Interessi" per mese**, aggiornato ogni giorno. Nella pagina del conto la card **Interessi** mostra tasso, interessi netti del mese e dell'anno e la ritenuta stimata.
 - Se Revolut cambia il tasso: pagina del conto → **Cambia tasso da una data**.
 - Se il saldo dell'app è diverso da quello di Revolut: pagina del conto → **Allinea al saldo reale**, scrivi il saldo che vedi e la data. La differenza diventa una rettifica che tiene il saldo uguale a quello scritto.
+
+## Investimenti (ETF)
+
+Le quote e il prezzo medio li calcola l'app dai tuoi acquisti e vendite. Nessun prezzo viene preso da internet: il valore lo scrivi tu.
+1. Scheda **Conti** → sezione **Investimenti** → **Nuovo ETF**. Scrivi il nome, l'ISIN o la sigla (facoltativi), l'**aliquota sulle plusvalenze** (26 di solito; più bassa per gli ETF con titoli di Stato) e il **Regime**: **Amministrato** (il broker trattiene le tasse) o **Dichiarativo** (le versi tu con la dichiarazione). **Salva**.
+2. Tocca l'ETF → **Compra**: quote, prezzo di 1 quota (fino a 4 decimali) e conto in euro. L'importo si calcola da solo; correggilo con le commissioni (es. 10 quote × 50,00 € = 500,00 €, con 1,00 € di commissione scrivi 501,00). **Salva**. Il conto in euro scende dell'importo.
+3. Il **prezzo medio di carico** è il totale pagato diviso le quote (es. 501,00 + 281,00 € per 15 quote = 52,1333 €). Vendendo, il prezzo medio delle quote rimaste non cambia.
+4. **Vendi**: quote, prezzo e importo della vendita al netto delle commissioni (es. 6 × 60,00 € − 1,00 € = 359,00 €). L'app mostra la plusvalenza (359,00 − 6 × 52,1333 = 46,20 €) e la tassa stimata (26 % = 12,01 €). In Amministrato la tassa è modificabile (scrivi quella del broker) e sul conto arriva 346,99 €; in Dichiarativo arrivano 359,00 € e i 12,01 € vanno in **Tasse da pagare**. Non puoi vendere più quote di quelle che hai a quella data.
+5. **Dividendo**: importo, conto e data. In Amministrato scrivi il netto arrivato; in Dichiarativo il lordo (la tassa stimata va in Tasse da pagare). Conta come entrata nella categoria **Dividendi**.
+6. **Aggiorna valore**: scrivi il valore di 1 quota che vedi nell'app del broker e la data. Prima del primo aggiornamento l'ETF vale il prezzo dell'ultimo acquisto ("prezzo d'acquisto").
+7. In Conti la card **Tasse degli investimenti** riassume per anno plusvalenze, minusvalenze, tasse trattenute e da pagare, e lo **zainetto fiscale** (le minusvalenze, con la scadenza al 31/12 del 4° anno dopo). È una **stima**: non sostituisce la dichiarazione né i documenti del broker; le minusvalenze non riducono le tasse sugli ETF.
+
+Comprare e vendere ETF non conta come spesa né come entrata, né in Quanto ti resta. Se elimini un ETF sparisce dal patrimonio, i suoi movimenti restano con "(eliminato)".
 
 ## Importare movimenti da CSV
 
@@ -61,7 +79,7 @@ Impostazioni → **Esporta CSV**: scegli il periodo e il formato.
 - **Excel italiano** (separatore `;`) per Excel in italiano.
 - **Numbers, Fogli, iPhone** (separatore `,`) per Numbers, Google Fogli, l'anteprima dell'iPhone ed Excel non italiano.
 
-Le uscite hanno il segno meno e l'**importo contato**: per una spesa di 40 € con 20 € esclusi il CSV riporta -20,00. Compra e Vendi compaiono come trasferimenti con l'importo uscito dal conto.
+Le uscite hanno il segno meno e l'**importo contato**: per una spesa di 40 € con 20 € esclusi il CSV riporta -20,00. Compra e Vendi crypto compaiono come trasferimenti con l'importo uscito dal conto. Gli ETF (formato provvisorio): Compra come "Conto → ETF nome" con l'importo pagato, Vendi come "ETF nome → Conto" con l'importo arrivato sul conto, dividendi come Entrata · Dividendi.
 
 Se aprendo il file vedi tutto nella colonna A, riesporta con l'altro formato. L'app ricorda l'ultima scelta.
 

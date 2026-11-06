@@ -1,8 +1,11 @@
-// Conti: totale del patrimonio in grande, sezioni Conti in euro, Depositi, Crypto; nuovo conto, trasferimenti.
-// Esporta i fogli di conto (con Deposito senza vincoli e icona) e di obiettivo (gli obiettivi stanno in Budget dalla v4).
+// Conti: totale del patrimonio in grande, sezioni Conti in euro, Depositi, Investimenti (v5), Crypto; nuovo conto, trasferimenti.
+// Esporta i fogli di conto (con Deposito senza vincoli e icona), di obiettivo (gli obiettivi stanno in Budget dalla v4)
+// e di ETF (v5), più il riepilogo delle tasse degli investimenti.
 
-import { el, card, list, row, section, segmented, emptyState, button, sheet, field, input, colorPicker, iconPicker, toggle, toast } from '../ui.js';
-import { formatEuro, parseEuroInput, parseQtyInput, formatEuroPlain, formatQtyPlain, parsePercentInput, formatPercentBp } from '../money.js';
+import { el, card, list, row, section, segmented, emptyState, button, sheet, field, input, colorPicker, iconPicker, toggle, toast, icon, preserveFocus, clear } from '../ui.js';
+import { formatEuro, parseEuroInput, parseQtyInput, formatEuroPlain, formatQtyPlain, parsePercentInput, formatPercentBp, formatPercentSigned, formatRateBp } from '../money.js';
+import { formatDateIt } from '../dates.js';
+import { sortedInvestments, etfSummary, investTaxYear, qtyText } from '../invest.js';
 import { ValidationError } from '../errors.js';
 import { PALETTE } from '../store.js';
 import * as C from '../calc.js';
@@ -17,20 +20,28 @@ export function render(root, ctx) {
   if (ctx.params.newAccount && !ctx.params.opened) { ctx.params.opened = true; openAccountForm(ctx); }
 }
 
-// Totale del patrimonio in grande (decisione v4 n. 4), poi conti in euro, depositi e crypto (solo quantità).
+// Data breve delle righe: GG/MM nell'anno in corso, altrimenti GG/MM/AAAA.
+const shortDate = (iso, today) => (iso.slice(0, 4) === today.slice(0, 4) ? formatDateIt(iso).slice(0, 5) : formatDateIt(iso));
+
+// Totale del patrimonio in grande (decisione v4 n. 4), poi conti in euro, depositi, investimenti e crypto (solo quantità).
+// v5: il totale comprende gli ETF al valore scritto a mano (o al prezzo d'acquisto), con le date dei valori usati.
 function renderAccounts(root, ctx, state) {
   const accounts = C.sortedAccounts(state);
   const nw = C.netWorth(state);
+  const today = ctx.today();
+  const etfs = sortedInvestments(state).map((e) => ({ etf: e, sum: etfSummary(state, e.id) }));
+  const held = etfs.filter((x) => x.sum.qty > 0);
+  const dates = held.map((x) => x.sum.valueInfo.date).sort();
   root.append(card({ title: 'Patrimonio totale', tint: 'butter', icon: 'cash', cls: 'card--networth' },
-    el('p', { class: 'hero__value', id: 'conti-total', text: formatEuro(nw.eurCents) }),
-    el('p', { class: 'hero__sub', text: nw.crypto.length ? `Conti in euro e depositi · ${C.cryptoLine(nw)} senza valore in euro` : 'Conti in euro e depositi' })));
+    el('p', { class: 'hero__value', id: 'conti-total', text: formatEuro(nw.totalCents) }),
+    el('p', { class: 'hero__sub', id: 'conti-total-sub', text: (held.length ? 'Conti in euro, depositi e ETF' : 'Conti in euro e depositi') + (nw.crypto.length ? ` · ${C.cryptoLine(nw)} senza valore in euro` : '') }),
+    held.length ? el('p', { class: 'hero__sub', id: 'conti-total-dates', text: dates[0] === dates[dates.length - 1] ? `Valore degli ETF al ${formatDateIt(dates[0])}` : `Valore degli ETF dal ${formatDateIt(dates[0])} al ${formatDateIt(dates[dates.length - 1])}` }) : null));
   if (!accounts.length) {
     root.append(emptyState({ icon: 'wallet', title: 'Nessun conto', text: 'Aggiungi conti in euro (banca, contanti), depositi o crypto (solo quantità).',
       action: button('Nuovo conto', () => openAccountForm(ctx), { kind: 'primary', id: 'conti-new-empty' }) }));
     return;
   }
   const bal = C.balances(state);
-  const today = ctx.today();
   const accRow = (a, subtitle) => row({
     icon: C.accountIcon(a), color: a.color, title: a.name, subtitle,
     value: amountIn(state, a.id, bal.get(a.id) || 0), valueClass: (bal.get(a.id) || 0) < 0 ? 'is-danger' : '', href: `#conti/${a.id}`, attrs: { 'data-account': a.id },
@@ -44,6 +55,7 @@ function renderAccounts(root, ctx, state) {
     ['Crypto', accounts.filter((a) => a.kind === 'crypto'), (a) => a.asset, 'conti-crypto'],
   ];
   for (const [title, list_, sub, id] of groups) {
+    if (id === 'conti-crypto') renderInvestments(root, ctx, state, etfs, today);
     if (!list_.length) continue;
     const tot = list_.filter((a) => a.kind === 'eur').reduce((t, a) => t + (bal.get(a.id) || 0), 0);
     root.append(section({ title, cls: id, action: list_[0].kind === 'eur' ? el('span', { class: 'is-muted', text: formatEuro(tot) }) : null }, list(...list_.map((a) => accRow(a, sub(a))))));
@@ -51,6 +63,96 @@ function renderAccounts(root, ctx, state) {
   root.append(el('div', { class: 'btn-row' },
     accounts.length > 1 ? button('Trasferisci', () => openMovementForm(ctx, { preset: { type: 'trasferimento' } }), { icon: 'transfer', id: 'conti-transfer' }) : null,
     button('Nuovo conto', () => openAccountForm(ctx), { icon: 'plus', id: 'conti-new-bottom' })));
+}
+
+// Sezione Investimenti (v5, design §6.3): una riga per ETF, poi "Nuovo ETF"; nota e riepilogo delle tasse sotto.
+function renderInvestments(root, ctx, state, etfs, today) {
+  const rows = etfs.map(({ etf, sum }) => {
+    const info = sum.valueInfo;
+    const subtitle = sum.qty <= 0 ? 'Nessuna quota'
+      : `${qtyText(sum.qty)} · ${info.source === 'manual' ? 'valore al' : 'prezzo d\'acquisto del'} ${shortDate(info.date, today)}`;
+    return row({
+      icon: 'chart', color: etf.color, title: etf.name, subtitle, cls: 'row--wrapsub',
+      value: formatEuro(sum.value), valueSub: sum.qty > 0 ? formatPercentSigned(sum.gainPct) : null,
+      valueSubClass: sum.qty > 0 && sum.gainPct > 0 ? 'is-income' : sum.qty > 0 && sum.gainPct < 0 ? 'is-danger' : null,
+      href: `#investimenti/${etf.id}`, attrs: { 'data-etf': etf.id },
+    });
+  });
+  rows.push(row({ icon: 'plus', color: 'var(--accent-fill)', title: 'Nuovo ETF', subtitle: etfs.length ? null : 'Quote e prezzo medio li calcola l\'app dai tuoi acquisti', onClick: () => openInvestmentForm(ctx), id: 'conti-new-etf' }));
+  const total = etfs.reduce((t, x) => t + x.sum.value, 0);
+  root.append(section({ title: 'Investimenti', cls: 'conti-invest', id: 'conti-invest', action: etfs.length ? el('span', { class: 'is-muted', id: 'conti-invest-total', text: formatEuro(total) }) : null,
+    footer: etfs.length ? 'Valori scritti a mano con Aggiorna valore. Nessun prezzo da internet.' : null }, list(...rows)));
+  const tax = investTaxCard(state, today);
+  if (tax) root.append(tax);
+}
+
+// Riepilogo annuo delle tasse degli investimenti (decisione v5 §3b, design §6.4): anno in corso e precedente
+// se hanno dati, zainetto delle minusvalenze con la scadenza. È una stima e lo dice.
+function investTaxCard(state, today) {
+  const y = Number(today.slice(0, 4));
+  const has = (t) => t.gains > 0 || t.losses > 0 || t.withheld > 0 || t.due > 0;
+  const years = [y, y - 1].map((yr) => ({ yr, t: investTaxYear(state, yr, today) }));
+  const carry = years[0].t.carry;
+  const shown = years.filter((x) => has(x.t));
+  if (!shown.length && !carry.length) return null;
+  const kv = (label, v, id) => el('div', { class: 'kv' }, el('span', { text: label }), el('span', { id, text: formatEuro(v) }));
+  return card({ title: 'Tasse degli investimenti', tint: 'indigo', icon: 'percent', id: 'conti-invest-tax' },
+    shown.map(({ yr, t }) => [
+      el('p', { class: 'ledger__title', text: String(yr) }),
+      kv('Plusvalenze realizzate', t.gains, `tax-gains-${yr}`),
+      t.losses > 0 ? kv('Minusvalenze', t.losses, `tax-losses-${yr}`) : null,
+      t.withheld > 0 ? kv('Tasse trattenute dal broker', t.withheld, `tax-withheld-${yr}`) : null,
+      t.due > 0 ? kv('Tasse da pagare con la dichiarazione', t.due, `tax-due-${yr}`) : null,
+    ]),
+    carry.length ? [
+      el('p', { class: 'ledger__title', text: 'Zainetto fiscale' }),
+      carry.map((c) => el('div', { class: 'kv', attrs: { 'data-carry': c.movement.id } }, el('span', { text: formatEuro(c.amount) }), el('span', { class: 'is-muted', text: `scade il ${formatDateIt(c.expires)}` }))),
+    ] : null,
+    el('div', { class: 'note' }, icon('info'), el('p', { text: 'Stima: non sostituisce la dichiarazione né i documenti del broker. Le minusvalenze non riducono le tasse sugli ETF.' })));
+}
+
+// Foglio Nuovo ETF / Modifica ETF (design §8.1): nome, ISIN o sigla, aliquota sulle plusvalenze, regime, colore.
+export function openInvestmentForm(ctx, etf = null) {
+  const { store } = ctx;
+  const state = store.getState();
+  const d = etf
+    ? { name: etf.name, code: etf.code || '', rateText: formatRateBp(etf.taxRateBp).replace('%', ''), regime: etf.taxRegime, color: etf.color }
+    : { name: '', code: '', rateText: '26', regime: 'amministrato', color: PALETTE[(state.investments || []).length % PALETTE.length] };
+  let body;
+  const draw = () => preserveFocus(() => { clear(body); body.append(...build()); });
+  function build() {
+    return [
+      el('div', { class: 'form-group' },
+        field({ label: 'Nome', field: 'name', id: 'e-name', input: input({ id: 'e-name', value: d.name, maxlength: 60, placeholder: 'Es. ETF Mondo', onInput: (v) => { d.name = v; } }) }),
+        field({ label: 'ISIN o sigla', field: 'code', id: 'e-code', hint: 'Il codice ISIN di 12 caratteri o la sigla del broker',
+          input: input({ id: 'e-code', value: d.code, maxlength: 20, placeholder: 'Facoltativo', onInput: (v) => { d.code = v; }, attrs: { autocapitalize: 'characters' } }) }),
+        field({ label: 'Aliquota sulle plusvalenze (%)', field: 'taxRateBp', id: 'e-rate', hint: 'Di solito 26%. Per gli ETF con titoli di Stato è più bassa, perché quella parte è tassata al 12,5%.',
+          input: input({ id: 'e-rate', value: d.rateText, inputmode: 'decimal', placeholder: '26', onInput: (v) => { d.rateText = v; } }) })),
+      el('p', { class: 'field__label', text: 'Regime' }),
+      segmented([{ value: 'amministrato', label: 'Amministrato', id: 'e-regime-amm' }, { value: 'dichiarativo', label: 'Dichiarativo', id: 'e-regime-dich' }], d.regime, (v) => { d.regime = v; draw(); }, { label: 'Regime' }),
+      el('p', { class: 'section-footer', id: 'e-regime-hint', text: d.regime === 'amministrato'
+        ? 'Il broker trattiene le tasse quando vendi: l\'app le toglie dall\'importo che arriva sul conto.'
+        : 'Le tasse le versi tu con la dichiarazione dei redditi: l\'app le somma in Tasse da pagare.' }),
+      etf ? el('p', { class: 'section-footer', text: 'Cambiare regime o aliquota non modifica le vendite già salvate.' }) : null,
+      el('p', { class: 'field__label', text: 'Colore' }),
+      el('div', { class: 'form-group' }, el('div', { class: 'field', dataset: { field: 'color' } }, colorPicker(d.color, (c) => { d.color = c; }), el('p', { class: 'field__error', hidden: true }))),
+    ];
+  }
+  return sheet({
+    title: etf ? 'Modifica ETF' : 'Nuovo ETF',
+    onSave: () => {
+      const taxRateBp = parsePercentInput(d.rateText, { max: 10000 });
+      if (taxRateBp === null) throw new ValidationError('Scrivi un\'aliquota tra 0 e 100 (es. 26)', 'taxRateBp');
+      const inp = { name: d.name, code: d.code, taxRateBp, taxRegime: d.regime, color: d.color };
+      if (etf) { store.updateInvestment(etf.id, inp); toast('Modifiche salvate'); } else {
+        inp.order = (state.investments || []).length;
+        store.addInvestment(inp);
+        toast('ETF creato');
+      }
+      return true;
+    },
+    content: (s) => { body = s.body; body.append(...build()); setTimeout(() => document.getElementById('e-name')?.focus(), 0); },
+  });
 }
 
 // Foglio nuovo/modifica conto. Il tipo non cambia se il conto ha già movimenti.

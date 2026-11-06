@@ -1,4 +1,4 @@
-// Rotte di MoneyFlow (v4), funzione pura: percorso e query dell'hash → vista e scheda, oppure reindirizzamento.
+// Rotte di MoneyFlow (v4, v5: #investimenti/<id>), funzione pura: percorso e query dell'hash → vista e scheda, oppure reindirizzamento.
 // Schede: home, movimenti, budget, statistiche, conti. Le rotte vecchie si reindirizzano con la query conservata.
 
 const withQuery = (target, query = {}) => {
@@ -25,6 +25,9 @@ export function resolveRoute(path = [], query = {}) {
     case 'conti':
       if (b === 'obiettivi') return { redirect: withQuery('budget/obiettivi', query) };
       return b ? { name: 'conto', tab: 'conti' } : { name: 'conti', tab: 'conti' };
+    // v5: pagina dell'ETF; senza id si torna a Conti (la lista degli ETF è la sezione Investimenti).
+    case 'investimenti':
+      return b ? { name: 'investimento', tab: 'conti' } : { redirect: 'conti' };
     case 'obiettivi':
       return b ? { name: 'obiettivo', tab: 'budget' } : { redirect: withQuery('budget/obiettivi', query) };
     case 'impostazioni':

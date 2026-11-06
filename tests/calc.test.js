@@ -252,7 +252,8 @@ for (const v of ['v2', 'v3']) {
     const s = store.getState();
     const id = (n) => `${v}-${String(n).padStart(4, '0')}`;
     assert.deepEqual([...C.balances(s)], [[id(1), 533151], [id(2), 11700], [id(3), 800], [id(4), 1649000]]);
-    assert.deepEqual(C.netWorth(s), { eurCents: 544851, crypto: [{ asset: 'BTC', units: 1649000 }] });
+    // v5: in più investCents (nessun ETF) e totalCents, uguale al totale in euro della v3.
+    assert.deepEqual(C.netWorth(s), { eurCents: 544851, investCents: 0, totalCents: 544851, crypto: [{ asset: 'BTC', units: 1649000 }] });
     assert.deepEqual(C.totals(s, '2026-02-01', '2026-02-28'), { income: 205000, expense: 11550, net: 193450, rate: 944 });
     const oc = C.openCredits(s);
     assert.equal(oc.total, 3500);
@@ -262,6 +263,16 @@ for (const v of ['v2', 'v3']) {
     assert.deepEqual(y.months, [{ ym: '2026-01', taxable: 273000, irpef: 52000 }]);
   });
 }
+
+// Valori calcolati dal codice v4 pubblicato (856eba0) sulla fixture v4: devono restare uguali.
+test('fixture v4: saldi, patrimonio, totali e crediti come nella v4', () => {
+  const raw = readFileSync(new URL('./fixtures/data-v4.json', import.meta.url), 'utf8');
+  const s = createStore({ storage: memoryStorage({ 'moneyflow:data': raw }), now: clock(), uuid: seqUuid() }).getState();
+  assert.deepEqual([...C.balances(s)], [['v4-0001', 423701], ['v4-0002', 6750], ['v4-0003', 100504], ['v4-0004', 1800000], ['v4-0005', 0]]);
+  assert.deepEqual(C.netWorth(s), { eurCents: 530955, investCents: 0, totalCents: 530955, crypto: [{ asset: 'BTC', units: 1800000 }] });
+  assert.deepEqual(C.totals(s, '2026-02-01', '2026-02-28'), { income: 205121, expense: 12750, net: 192371, rate: 938 });
+  assert.equal(C.openCredits(s).total, 3000);
+});
 
 test('v4 spesa divisa: 90,00 tra Anna 30,00 e Luca 30,00, restituzioni per persona', () => {
   const { store, cat, eur, now } = world();

@@ -2,7 +2,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { createStore, ValidationError, StorageError, DATA_KEY, PALETTE, SCHEMA_VERSION, INTEREST_CATEGORY_ID } from '../js/store.js';
+import { createStore, ValidationError, StorageError, DATA_KEY, INVEST_KEY, PALETTE, SCHEMA_VERSION, INTEREST_CATEGORY_ID, DIVIDEND_CATEGORY_ID } from '../js/store.js';
 import { PICK_ICONS } from '../js/icons.js';
 import { tradeEuroCents } from '../js/money.js';
 import { memoryStorage, clock, seqUuid } from './helpers.js';
@@ -28,16 +28,19 @@ const expectValidation = (fn, field) => {
   assert.throws(fn, (e) => e instanceof ValidationError && (!field || e.field === field) && typeof e.message === 'string');
 };
 
-test('categorie iniziali di D17 più Interessi (v4), due "Altro" ammessi', () => {
+test('categorie iniziali di D17 più Interessi (v4) e Dividendi (v5), due "Altro" ammessi', () => {
   const { store } = setup();
   const cats = store.getState().categories;
   assert.deepEqual(cats.filter((c) => c.type === 'uscita').map((c) => c.name), ['Casa', 'Spesa', 'Trasporti', 'Bollette', 'Abbonamenti', 'Salute', 'Svago', 'Ristoranti', 'Regali', 'Altro']);
-  assert.deepEqual(cats.filter((c) => c.type === 'entrata').map((c) => c.name), ['Stipendio', 'Rimborsi', 'Altro', 'Interessi']);
+  assert.deepEqual(cats.filter((c) => c.type === 'entrata').map((c) => c.name), ['Stipendio', 'Rimborsi', 'Altro', 'Interessi', 'Dividendi']);
   assert.equal(cats.find((c) => c.name === 'Stipendio').role, 'stipendio');
   const int = cats.find((c) => c.name === 'Interessi');
   assert.equal(int.id, INTEREST_CATEGORY_ID);
   assert.equal(int.role, 'interessi');
+  const div = cats.find((c) => c.name === 'Dividendi');
+  assert.deepEqual([div.id, div.role, div.color], [DIVIDEND_CATEGORY_ID, 'dividendi', '#4F46E5']);
   assert.equal(store.getState().accounts.length, 0);
+  assert.deepEqual(store.getState().investments, []);
 });
 
 test('conti: CRUD, nomi unici senza maiuscole, simbolo crypto', () => {
@@ -167,7 +170,7 @@ test('dati corrotti: copia grezza salvata a parte e ripartenza', () => {
   const store = createStore({ storage, now: clock(42), uuid: seqUuid() });
   assert.equal(store.corrupted, `${DATA_KEY}:corrupt-42`);
   assert.equal(storage.getItem(`${DATA_KEY}:corrupt-42`), '{rotto');
-  assert.equal(store.getState().categories.length, 14);
+  assert.equal(store.getState().categories.length, 15);
 });
 
 test('fixture data-v1.json caricata identica', () => {
@@ -175,17 +178,23 @@ test('fixture data-v1.json caricata identica', () => {
   const storage = memoryStorage({ [DATA_KEY]: raw });
   const store = createStore({ storage, now: clock(), uuid: seqUuid() });
   assert.equal(store.corrupted, null);
-  assert.deepEqual(store.getState(), JSON.parse(raw));
+  const { investments, ...rest } = store.getState();
+  assert.deepEqual(rest, JSON.parse(raw));
+  assert.deepEqual(investments, []);
+  assert.equal(storage.getItem(INVEST_KEY), null, 'la chiave degli ETF non si crea al solo caricamento');
 });
 
-for (const v of ['v2', 'v3']) {
+for (const v of ['v2', 'v3', 'v4']) {
   test(`fixture data-${v}.json caricata identica`, () => {
     const raw = readFileSync(new URL(`./fixtures/data-${v}.json`, import.meta.url), 'utf8');
     const storage = memoryStorage({ [DATA_KEY]: raw });
     const store = createStore({ storage, now: clock(), uuid: seqUuid() });
     assert.equal(store.corrupted, null);
-    assert.deepEqual(store.getState(), JSON.parse(raw));
+    const { investments, ...rest } = store.getState();
+    assert.deepEqual(rest, JSON.parse(raw));
+    assert.deepEqual(investments, []);
     assert.equal(storage.getItem(DATA_KEY), raw, 'il caricamento non riscrive i dati');
+    assert.equal(storage.getItem(INVEST_KEY), null, 'la chiave degli ETF non si crea al solo caricamento');
   });
 }
 

@@ -47,3 +47,9 @@ test('rotte nuove della v4', () => {
   assert.deepEqual(r('#da-ricevere?persona=Anna'), { name: 'da-ricevere', tab: 'home' });
   assert.deepEqual(r('#movimenti?vista=calendario&mese=2026-03&giorno=2026-03-02'), { name: 'movimenti', tab: 'movimenti' });
 });
+
+test('rotte nuove della v5: pagina dell\'ETF', () => {
+  assert.deepEqual(r('#investimenti/e1'), { name: 'investimento', tab: 'conti' });
+  assert.deepEqual(r('#investimenti'), { redirect: 'conti' });
+  assert.deepEqual(r('#conti/e1'), { name: 'conto', tab: 'conti' });
+});

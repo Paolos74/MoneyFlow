@@ -1,7 +1,7 @@
 // Avvio di MoneyFlow: store, preferenze, sync, router con hash, barra in alto e schede,
 // service worker con banner "Aggiorna", installazione, pillola Offline, più schede aperte.
 
-import { createStore, DATA_KEY } from './store.js';
+import { createStore, DATA_KEY, INVEST_KEY } from './store.js';
 import { createPrefs, PREFS_KEY } from './prefs.js';
 import { createSync, SYNC_KEY } from './sync.js';
 import { createTaxSettings, TAX_KEY } from './tax-settings.js';
@@ -22,6 +22,7 @@ import * as fondoPensione from './views/fondo-pensione.js';
 import * as budget from './views/budget.js';
 import * as conti from './views/conti.js';
 import * as conto from './views/conto.js';
+import * as investimento from './views/investimento.js';
 import * as obiettivo from './views/obiettivo.js';
 import * as impostazioni from './views/impostazioni.js';
 
@@ -80,7 +81,7 @@ const currentRoute = () => parseHash().path;
 // Nomi delle rotte (js/routes.js) → moduli delle viste.
 const VIEWS = {
   home, 'da-confermare': daConfermare, 'da-ricevere': daRicevere, programmati, movimenti, budget,
-  statistiche, stipendio, 'fondo-pensione': fondoPensione, conti, conto, obiettivo, impostazioni,
+  statistiche, stipendio, 'fondo-pensione': fondoPensione, conti, conto, investimento, obiettivo, impostazioni,
 };
 
 function resolve(path, query) {
@@ -188,7 +189,7 @@ sync.subscribe(() => { if (currentRoute()[0] === 'impostazioni') rerender(); });
 // Più schede aperte: se un'altra scheda salva, ricarica e ridisegna.
 addEventListener('storage', (e) => {
   if (!e.key || !e.key.startsWith('moneyflow:')) return;
-  if (e.key === DATA_KEY) store.reload();
+  if (e.key === DATA_KEY || e.key === INVEST_KEY) store.reload();
   else if (e.key === PREFS_KEY) { prefs.reload(); applyTheme(); rerender(); }
   else if (e.key === SYNC_KEY) sync.reloadState();
   else if (e.key === TAX_KEY) { taxSettings.reload(); rerender(); }

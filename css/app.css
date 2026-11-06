@@ -51,7 +51,9 @@
   --hero-left-bg: linear-gradient(160deg, #D9F3E5 0%, #EAF6E2 60%, #F4F4DA 100%);
   --hero-nw-bg: linear-gradient(160deg, #FBEFC8 0%, #FBE6D3 100%);
   --hero-tile: rgba(255, 255, 255, 0.72);
-  --ring-track: rgba(4, 120, 87, 0.16);
+  --ring-track: rgba(60, 60, 67, 0.12);
+  /* v5: colore progressivo di "Quanto ti resta": verde 0 %, giallo 50 %, arancio 85 %, rosso ≥ 100 % del budget speso. */
+  --prog-0: #047857; --prog-1: #846100; --prog-2: #AD4800; --prog-3: #C5221F;
   --hero-shadow: 0 8px 24px rgba(4, 120, 87, 0.10);
 }
 
@@ -85,7 +87,8 @@
   --hero-left-bg: linear-gradient(160deg, #0F3528 0%, #13302A 60%, #1B2D1B 100%);
   --hero-nw-bg: linear-gradient(160deg, #3A2F14 0%, #3B281B 100%);
   --hero-tile: rgba(0, 0, 0, 0.24);
-  --ring-track: rgba(52, 211, 153, 0.18);
+  --ring-track: rgba(235, 235, 245, 0.12);
+  --prog-0: #34D399; --prog-1: #FACC15; --prog-2: #FB923C; --prog-3: #FF6B5E;
   --hero-shadow: 0 1px 2px rgba(0, 0, 0, 0.4);
 }
 
@@ -120,7 +123,8 @@
     --hero-left-bg: linear-gradient(160deg, #0F3528 0%, #13302A 60%, #1B2D1B 100%);
     --hero-nw-bg: linear-gradient(160deg, #3A2F14 0%, #3B281B 100%);
     --hero-tile: rgba(0, 0, 0, 0.24);
-    --ring-track: rgba(52, 211, 153, 0.18);
+    --ring-track: rgba(235, 235, 245, 0.12);
+    --prog-0: #34D399; --prog-1: #FACC15; --prog-2: #FB923C; --prog-3: #FF6B5E;
     --hero-shadow: 0 1px 2px rgba(0, 0, 0, 0.4);
   }
 }
@@ -736,4 +740,51 @@ a.meter.meter--cat, .meter--cat { display: flex; gap: 12px; align-items: center;
 
 @media (prefers-contrast: more) {
   .card.card--remaining, .card.card--networth, .today-box, .remaining__kv { border: 1px solid var(--separator); }
+}
+
+/* ---- Design v5: colore progressivo, consiglio discreto, "Quanto metti da parte", Investimenti ---- */
+
+/* Colore progressivo di "Quanto ti resta" (modo budget): la vista imposta --prog-a (tappa di partenza),
+   --prog-b (tappa di arrivo) e --prog-t (peso dell'arrivo). Fuori da @supports la tappa di partenza, che ha già
+   il contrasto AA: così i browser senza color-mix non perdono il colore. Nessuna transizione. */
+.remaining__main.prog .hero__value,
+.remaining__main.prog .remaining__over-label { color: var(--prog-a); }
+.remaining__main.prog .ring__fill { stroke: var(--prog-a); }
+@supports (color: color-mix(in srgb, red 50%, blue)) {
+  .remaining__main.prog .hero__value,
+  .remaining__main.prog .remaining__over-label { color: color-mix(in srgb, var(--prog-b) var(--prog-t), var(--prog-a)); }
+  .remaining__main.prog .ring__fill { stroke: color-mix(in srgb, var(--prog-b) var(--prog-t), var(--prog-a)); }
+}
+.card .remaining__over { margin: 2px 0 4px; }
+.remaining__over-label { display: block; font-size: 15px; font-weight: 600; line-height: 1.2; }
+.card--remaining .remaining__over .hero__value { display: block; margin: 0; }
+
+/* Consiglio discreto e invito "Imposta i budget": righe grigie piccole con un'azione verde. */
+.advice { margin-top: 10px; border-top: 0.5px solid var(--separator); padding-top: 2px; }
+.advice__row { display: grid; grid-template-columns: 16px 1fr auto; gap: 8px; align-items: center; min-height: 44px; padding: 6px 0; text-decoration: none; color: var(--muted); }
+.advice__row:active { opacity: .6; }
+.advice__icon { display: grid; place-items: center; color: var(--muted); }
+.advice__text { font-size: 13px; line-height: 1.4; color: var(--muted); min-width: 0; overflow: hidden; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; }
+.advice__action { font-size: 13px; font-weight: 600; color: var(--accent); white-space: nowrap; display: inline-flex; align-items: center; gap: 2px; }
+
+/* "Quanto metti da parte": card bianca, numero grande ma più piccolo del protagonista, negativo nel colore del testo. */
+.card .saved__value { font-family: var(--font-num); font-size: 30px; line-height: 1.15; font-weight: 700; margin: 2px 0; white-space: nowrap; font-variant-numeric: tabular-nums; color: var(--income); }
+.card .saved__value.is-long { font-size: 26px; }
+.card .saved__value.is-neg { color: var(--text); }
+.card--saved .hero__label { font-size: 14px; margin: 0 0 2px; }
+.card--saved .hero__sub { font-size: 14px; margin: 0 0 4px; }
+.card--saved .kv span.is-muted { color: var(--muted); }
+
+/* Investimenti: guadagno in % sotto il valore della riga, verde o rosso. */
+.row__value small.is-income { color: var(--income); }
+.row__value small.is-danger { color: var(--danger); }
+.card--etf .hero__value.is-long { font-size: 30px; }
+.btn-row--grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.btn-row--grid > .btn { min-height: 44px; width: 100%; padding: 0 10px; white-space: nowrap; }
+.btn-row--grid > .btn:last-child:nth-child(odd) { grid-column: 1 / -1; }
+.q-net { font-size: 17px; font-weight: 600; color: var(--text); margin: 8px 16px 2px; }
+.q-due { font-size: 15px; color: var(--muted); margin: 0 16px 6px; }
+
+@media (prefers-contrast: more) {
+  .card.card--saved { border: 1px solid var(--separator); }
 }

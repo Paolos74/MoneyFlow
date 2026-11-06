@@ -30,7 +30,7 @@ export function parseBackup(text) {
 // Conteggi per il riepilogo prima di importare.
 export function backupSummary(data) {
   const n = (list) => list.filter((r) => !r.deleted).length;
-  return { accounts: n(data.accounts), categories: n(data.categories), movements: n(data.movements), scheduled: n(data.scheduled), goals: n(data.goals) };
+  return { accounts: n(data.accounts), categories: n(data.categories), movements: n(data.movements), scheduled: n(data.scheduled), goals: n(data.goals), investments: n(data.investments || []) };
 }
 
 export function backupFileName(now = Date.now()) {

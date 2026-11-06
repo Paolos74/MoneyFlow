@@ -4,6 +4,7 @@
 import { formatEuro, formatEuroPlain, formatQty, percentTenths } from './money.js';
 import { monthEnd, monthStart, monthOf, startOfIsoWeek, addDays, toISO, parseISO } from './dates.js';
 import { pendingOccurrences, occurrences, yearlyAmount, nextOccurrence } from './recurrence.js';
+import { etfOf, investValue } from './invest.js';
 
 const live = (list) => list.filter((r) => !r.deleted);
 const byId = (list, id) => list.find((r) => r.id === id) || null;
@@ -20,8 +21,9 @@ export function sortedCategories(state, type) {
   return live(state.categories).filter((c) => c.type === type).sort((a, b) => (a.order - b.order) || a.createdAt - b.createdAt);
 }
 
+// v5: l'id può essere quello di un ETF (lato "investimento" di Compra/Vendi): nome dell'ETF.
 export function accountLabel(state, id) {
-  const a = byId(state.accounts, id);
+  const a = byId(state.accounts, id) || etfOf(state, id);
   if (!a) return UNKNOWN_ACCOUNT;
   return a.deleted ? `${a.name} (eliminato)` : a.name;
 }
@@ -43,12 +45,12 @@ const DEFAULT_CATEGORY_ICONS = {
   'default-uscita-bollette': 'bolt', 'default-uscita-abbonamenti': 'repeat', 'default-uscita-salute': 'heart',
   'default-uscita-svago': 'ticket', 'default-uscita-ristoranti': 'fork', 'default-uscita-regali': 'gift',
   'default-uscita-altro': 'tag', 'default-entrata-stipendio': 'briefcase', 'default-entrata-rimborsi': 'return',
-  'default-entrata-altro': 'tag', 'default-entrata-interessi': 'percent',
+  'default-entrata-altro': 'tag', 'default-entrata-interessi': 'percent', 'default-entrata-dividendi': 'coin',
 };
 
 export function categoryIconOf(cat) {
   if (!cat) return 'tag';
-  return cat.icon || DEFAULT_CATEGORY_ICONS[cat.id] || (cat.role === 'interessi' ? 'percent' : cat.role === 'stipendio' ? 'briefcase' : 'tag');
+  return cat.icon || DEFAULT_CATEGORY_ICONS[cat.id] || (cat.role === 'interessi' ? 'percent' : cat.role === 'stipendio' ? 'briefcase' : cat.role === 'dividendi' ? 'coin' : 'tag');
 }
 
 export function categoryIcon(state, id) {
@@ -69,6 +71,7 @@ export function movementColor(state, m) {
     const exp = byId(state.movements, m.refundOf);
     return exp ? categoryColor(state, exp.categoryId) : NEUTRAL_COLOR;
   }
+  if (m.etfId) return etfOf(state, m.etfId)?.color || NEUTRAL_COLOR;
   return byId(state.accounts, m.accountId)?.color || NEUTRAL_COLOR;
 }
 
@@ -114,6 +117,8 @@ export function balances(state, upTo = null) {
 }
 
 // Patrimonio: somma in euro dei soli conti in euro; le crypto restano come quantità (scelta provvisoria).
+// v5: investCents = valore degli ETF non eliminati a upTo (valore scritto a mano o prezzo d'acquisto, js/invest.js);
+// totalCents = eurCents + investCents (Patrimonio totale).
 export function netWorth(state, upTo = null) {
   const bal = balances(state, upTo);
   let eurCents = 0;
@@ -123,8 +128,11 @@ export function netWorth(state, upTo = null) {
     if (a.kind === 'crypto') crypto.set(a.asset, (crypto.get(a.asset) || 0) + b);
     else eurCents += b;
   }
+  const investCents = investValue(state, upTo);
   return {
     eurCents,
+    investCents,
+    totalCents: eurCents + investCents,
     crypto: [...crypto.entries()].map(([asset, units]) => ({ asset, units })).sort((a, b) => a.asset.localeCompare(b.asset)),
   };
 }
@@ -134,7 +142,7 @@ export function cryptoLine(nw) {
 }
 
 export function netWorthSeries(state, months) {
-  return months.map((ym) => ({ month: ym, eurCents: netWorth(state, monthEnd(ym)).eurCents }));
+  return months.map((ym) => { const nw = netWorth(state, monthEnd(ym)); return { month: ym, eurCents: nw.eurCents, totalCents: nw.totalCents }; });
 }
 
 function inRange(m, from, to) {
@@ -173,6 +181,29 @@ export function byCategory(state, from, to, type = 'uscita') {
 
 export function byMonth(state, months) {
   return months.map((ym) => ({ month: ym, ...totals(state, monthStart(ym), monthEnd(ym)) }));
+}
+
+// Consiglio discreto di "Quanto ti resta" (v5, solo con almeno un budget): uscite contate del periodo in categorie
+// senza budget (anche eliminate o sconosciute), dalla più alta, esclusa "Altro" di uscita; `other` = uscite in
+// "Altro" di uscita (con o senza budget), così la stessa spesa non compare due volte; otherBudgeted = "Altro" ha un budget.
+export const OTHER_EXPENSE_ID = 'default-uscita-altro';
+export function budgetAdvice(state, period) {
+  const map = new Map();
+  let other = 0;
+  for (const m of state.movements) {
+    if (!inRange(m, period.from, period.to) || m.type !== 'uscita') continue;
+    const v = countedExpense(m);
+    if (!v) continue;
+    if (m.categoryId === OTHER_EXPENSE_ID) { other += v; continue; }
+    const c = byId(state.categories, m.categoryId);
+    if (c && !c.deleted && c.budget) continue;
+    map.set(m.categoryId, (map.get(m.categoryId) || 0) + v);
+  }
+  const oc = byId(state.categories, OTHER_EXPENSE_ID);
+  return {
+    unbudgeted: [...map.entries()].map(([categoryId, value]) => ({ categoryId, value })).sort((a, b) => b.value - a.value),
+    other, otherBudgeted: !!(oc && !oc.deleted && oc.budget),
+  };
 }
 
 // Budget per categoria: `range` è un mese 'YYYY-MM' oppure un periodo { from, to } (periodo dallo stipendio, v4).
@@ -361,6 +392,8 @@ export function salaryYear(state, year) {
 export const isTrade = (m) => m.type === 'trasferimento' && (m.trade === 'compra' || m.trade === 'vendi');
 
 export function tradeLabel(state, m) {
+  // v5: Compra/Vendi di un ETF → "Compra <nome dell'ETF>".
+  if (m.etfId) return (m.trade === 'compra' ? 'Compra ' : 'Vendi ') + (etfOf(state, m.etfId)?.name || 'ETF');
   const cryptoId = m.trade === 'compra' ? m.toAccountId : m.accountId;
   const asset = byId(state.accounts, cryptoId)?.asset || 'crypto';
   return (m.trade === 'compra' ? 'Compra ' : 'Vendi ') + asset;
@@ -400,7 +433,7 @@ export function templateLabel(state, t) {
 const sortMovs = (a, b) => b.date.localeCompare(a.date) || b.createdAt - a.createdAt;
 
 // Ricerca e filtri dei movimenti (descrizione, note, conti, categoria, importo).
-export function searchMovements(state, { from, to, accountId, categoryId, q } = {}) {
+export function searchMovements(state, { from, to, accountId, categoryId, q, etfId } = {}) {
   const needle = (q || '').trim().toLocaleLowerCase('it');
   return state.movements.filter((m) => {
     if (m.deleted) return false;
@@ -408,6 +441,7 @@ export function searchMovements(state, { from, to, accountId, categoryId, q } = 
     if (to && m.date > to) return false;
     if (accountId && m.accountId !== accountId && m.toAccountId !== accountId) return false;
     if (categoryId && m.categoryId !== categoryId) return false;
+    if (etfId && m.etfId !== etfId) return false;
     if (!needle) return true;
     const hay = [m.description, m.note, accountLabel(state, m.accountId), m.toAccountId ? accountLabel(state, m.toAccountId) : '',
       m.categoryId ? categoryLabel(state, m.categoryId) : '', formatEuro(m.amount), formatEuroPlain(m.amount)].join(' ').toLocaleLowerCase('it');

@@ -73,3 +73,25 @@ test('v4: interessi come Entrata · Interessi, rettifica come "Rettifica saldo"'
     '31/03/2026;Deposito;Rettifica saldo;;Allineamento al saldo reale;-0,37',
   ].join('\r\n') + '\r\n');
 });
+
+test('v5: Compra e Vendi ETF come Trasferimento con l\'importo in euro, dividendo come Entrata · Dividendi', () => {
+  const s = {
+    accounts: [{ id: 'a1', name: 'Conto principale', kind: 'eur', asset: null, initial: 0, deleted: false }],
+    investments: [{ id: 'e1', name: 'Mondo prova', deleted: false }, { id: 'e2', name: 'ETF Bond prova', deleted: true }],
+    categories: [{ id: 'default-entrata-dividendi', name: 'Dividendi', type: 'entrata', deleted: false }],
+    movements: [
+      { id: 'm1', type: 'trasferimento', trade: 'compra', date: '2026-11-02', amount: 50100, amountTo: 1000000000, price: 500000, accountId: 'a1', toAccountId: 'e1', etfId: 'e1', description: '', createdAt: 1, deleted: false },
+      { id: 'm2', type: 'trasferimento', trade: 'vendi', date: '2026-11-18', amount: 600000000, amountTo: 34699, tax: 1201, price: 600000, accountId: 'e1', toAccountId: 'a1', etfId: 'e1', description: '', createdAt: 2, deleted: false },
+      { id: 'm3', type: 'entrata', date: '2026-11-21', amount: 3000, accountId: 'a1', categoryId: 'default-entrata-dividendi', etfId: 'e1', description: 'Cedola', createdAt: 3, deleted: false },
+      { id: 'm4', type: 'trasferimento', trade: 'compra', date: '2026-11-22', amount: 10000, amountTo: 100000000, price: 1000000, accountId: 'a1', toAccountId: 'e2', etfId: 'e2', description: '', createdAt: 4, deleted: false },
+    ],
+  };
+  assert.equal(buildCsv(s, { from: '2026-11-01', to: '2026-11-30' }), '\uFEFF' + [
+    'Data;Conto;Tipo;Categoria;Descrizione;Importo',
+    '02/11/2026;Conto principale → ETF Mondo prova;Trasferimento;;;501,00',
+    '18/11/2026;ETF Mondo prova → Conto principale;Trasferimento;;;346,99',
+    '21/11/2026;Conto principale;Entrata;Dividendi;Cedola;30,00',
+    '22/11/2026;Conto principale → ETF Bond prova (eliminato);Trasferimento;;;100,00',
+  ].join('\r\n') + '\r\n');
+  assert.equal(buildCsv(s, { from: '2026-11-01', to: '2026-11-30', format: 'comma' }).split('\r\n')[2], '18/11/2026,ETF Mondo prova → Conto principale,Trasferimento,,,"346,99"');
+});

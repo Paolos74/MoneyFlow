@@ -48,7 +48,7 @@ export function mapError(status, body, service) {
 
 const emptyState = () => ({
   apiKey: '', projectId: '', email: '', uid: '', idToken: '', refreshToken: '', expiresAt: 0,
-  cursor: null, dirty: {}, lastSyncAt: 0, lastError: '',
+  cursor: null, dirty: {}, lastSyncAt: 0, lastError: '', resyncV5: false,
 });
 
 function toFields(kind, rec) {
@@ -64,7 +64,9 @@ export function createSync({
   store, storage, fetch, now = () => Date.now(), config = FIREBASE_CONFIG,
   setTimer = (fn, ms) => globalThis.setTimeout(fn, ms), clearTimer = (t) => globalThis.clearTimeout(t),
 }) {
+  let resynced = false;
   let st = load();
+  if (resynced) save();
   let running = null;
   let timer = null;
   let busy = false;
@@ -77,6 +79,9 @@ export function createSync({
       if (Array.isArray(s.dirty)) s.dirty = Object.fromEntries(s.dirty.map((k) => [k, 0]));
       if (!s.dirty || typeof s.dirty !== 'object') s.dirty = {};
       delete s.password;
+      // v5: la v4 scartava i record di tipo sconosciuto (ETF) ma faceva avanzare il cursore. Una sola volta si
+      // rilegge tutto da Firebase, così un telefono che era in v4 riceve gli ETF creati da un altro telefono.
+      if (!s.resyncV5) { s.cursor = null; s.resyncV5 = true; resynced = !!raw; }
       return s;
     } catch { return emptyState(); }
   }

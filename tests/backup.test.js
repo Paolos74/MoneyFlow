@@ -49,22 +49,42 @@ test('file non validi rifiutati con messaggio italiano', () => {
 test('la fixture v1 si importa come backup', () => {
   const raw = readFileSync(new URL('./fixtures/data-v1.json', import.meta.url), 'utf8');
   const data = parseBackup(raw);
-  assert.deepEqual(data, JSON.parse(raw));
+  assert.deepEqual(data, { ...JSON.parse(raw), investments: [] }, 'v5: un backup senza ETF ha investments vuoto');
   assert.ok(backupSummary(data).movements > 0);
 });
 
-for (const v of ['v2', 'v3']) {
+for (const v of ['v2', 'v3', 'v4']) {
   test(`la fixture ${v} si importa come backup, andata e ritorno identico`, () => {
     const raw = readFileSync(new URL(`./fixtures/data-${v}.json`, import.meta.url), 'utf8');
+    const want = { ...JSON.parse(raw), investments: [] };
     const data = parseBackup(raw);
-    assert.deepEqual(data, JSON.parse(raw));
+    assert.deepEqual(data, want);
     const store = createStore({ storage: memoryStorage(), now: clock(), uuid: seqUuid('z') });
     store.replaceAll(data);
     const back = parseBackup(JSON.stringify(createBackup(store.getState())));
-    assert.deepEqual(back, JSON.parse(raw));
+    assert.deepEqual(back, want);
   });
 }
 
 test('nome del file di backup', () => {
   assert.match(backupFileName(new Date(2025, 2, 7, 10).getTime()), /^MoneyFlow_backup_2025-03-07\.json$/);
+});
+
+test('v5: backup con ETF e valori scritti a mano, andata e ritorno identico (anche la chiave degli ETF)', () => {
+  const store = richStore();
+  const etf = store.addInvestment({ name: 'ETF Mondo prova', code: 'IE00PROVA001', color: PALETTE[9] });
+  store.setInvestmentPrice(etf.id, '2026-11-20', 585000);
+  const gone = store.addInvestment({ name: 'ETF chiuso', color: PALETTE[2] });
+  store.deleteInvestment(gone.id);
+  const before = structuredClone(store.getState());
+  const text = JSON.stringify(createBackup(before));
+  assert.equal(backupSummary(parseBackup(text)).investments, 1);
+  const storage = memoryStorage();
+  const other = createStore({ storage, now: clock(), uuid: seqUuid('z') });
+  other.replaceAll(parseBackup(text));
+  assert.deepEqual(other.getState(), before);
+  assert.deepEqual(JSON.parse(storage.getItem('moneyflow:investments')).investments, before.investments);
+  // un backup v4 (senza ETF) importato sostituisce anche gli ETF
+  other.replaceAll(parseBackup(readFileSync(new URL('./fixtures/data-v4.json', import.meta.url), 'utf8')));
+  assert.deepEqual(other.getState().investments, []);
 });

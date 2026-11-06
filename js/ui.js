@@ -51,20 +51,21 @@ export function iconBox(name, color, { planned = false } = {}) {
 }
 
 // Riga di lista inset: icona colorata, titolo, sottotitolo, valore, chevron.
-export function row({ icon: ic, color, planned, title, subtitle, value, valueSub, valueClass, onClick, href, chevron = !!(onClick || href), cls = '', id, attrs }) {
+// v5: valueSubClass = classe del testo piccolo sotto il valore (es. is-income per il guadagno degli ETF).
+export function row({ icon: ic, color, planned, title, subtitle, value, valueSub, valueClass, valueSubClass, onClick, href, chevron = !!(onClick || href), cls = '', id, attrs }) {
   const tag = href ? 'a' : onClick ? 'button' : 'div';
   const node = el(tag, { class: `row ${ic ? '' : 'row--noicon'} ${cls}`, href, id, attrs: { type: tag === 'button' ? 'button' : null, ...(attrs || {}) }, on: onClick ? { click: onClick } : null },
     ic ? (ic instanceof Node ? ic : iconBox(ic, color, { planned })) : null,
     el('span', { class: 'row__main' },
       el('span', { class: 'row__title', text: title }),
       subtitle ? el('span', { class: 'row__sub' }, typeof subtitle === 'string' ? el('span', { text: subtitle }) : subtitle) : null),
-    value !== undefined && value !== null ? el('span', { class: `row__value ${valueClass || ''}` }, value, valueSub ? el('small', { text: valueSub }) : null) : null,
+    value !== undefined && value !== null ? el('span', { class: `row__value ${valueClass || ''}` }, value, valueSub ? el('small', { class: valueSubClass || null, text: valueSub }) : null) : null,
     chevron ? el('span', { class: 'row__chev' }, icon('chevron')) : null);
   return node;
 }
 
-export function section({ title, action, footer, cls = '' }, ...content) {
-  return el('section', { class: 'section ' + cls },
+export function section({ title, action, footer, cls = '', id }, ...content) {
+  return el('section', { class: 'section ' + cls, id },
     title || action ? el('h2', { class: 'section-header' }, el('span', { text: title || '' }), action || null) : null,
     ...content,
     footer ? el('p', { class: 'section-footer' }, footer) : null);
@@ -76,9 +77,10 @@ export function list(...rows) {
 
 // tint: colore dell'ambito (teal, indigo, violet, amber, pink, butter, emerald); icon: glifo nel riquadro accanto al titolo;
 // color: colore del riquadro (es. quello del conto) al posto della tinta.
-export function card({ title, link, cls = '', tint, icon: ic, color }, ...content) {
+// v5: id facoltativo sull'elemento <section> della card.
+export function card({ title, link, cls = '', tint, icon: ic, color, id }, ...content) {
   const badge = ic ? el('span', { class: 'card__badge', vars: color ? { '--c': color } : {} }, icon(ic)) : null;
-  return el('section', { class: `card ${tint ? 'card--t-' + tint : ''} ${cls}` },
+  return el('section', { class: `card ${tint ? 'card--t-' + tint : ''} ${cls}`, id },
     title || link ? el('div', { class: 'card__head' }, el('h2', { class: 'card__title' }, badge, el('span', { text: title || '' })), link || null) : null,
     ...content);
 }

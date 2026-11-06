@@ -2,7 +2,8 @@
 // programmati da confermare, selettore del periodo.
 
 import { el, row, section, list, chips, field, input, icon, button } from '../ui.js';
-import { formatEuro, formatEuroSigned, formatQty } from '../money.js';
+import { formatEuro, formatEuroSigned, formatQty, formatPrice4 } from '../money.js';
+import { etfOf, qtyText } from '../invest.js';
 import { formatDayHeader, formatDateIt, PERIODS, periodRange } from '../dates.js';
 import { freqLabel } from '../recurrence.js';
 import * as C from '../calc.js';
@@ -29,12 +30,47 @@ const typeLabelOf = (m) => (m.type === 'variazione' && m.align ? 'Rettifica sald
 export function movementTitle(state, m) {
   if (m.description) return m.description;
   if (C.isTrade(m)) return C.tradeLabel(state, m);
+  if (m.type === 'entrata' && m.etfId) return `Dividendo ${etfOf(state, m.etfId)?.name || 'ETF'}`;
   if (m.type === 'uscita' || m.type === 'entrata') return C.categoryLabel(state, m.categoryId);
   return typeLabelOf(m);
 }
 
-// Riga di un movimento; con accountId mostra l'effetto su quel conto.
-export function movementRow(ctx, m, { accountId = null } = {}) {
+// Compra/Vendi di un ETF (v5): "10 quote × 50,00 € · Conto principale"; il valore è in euro dal punto di vista
+// del conto (−501,00 € / +346,99 €), oppure in quote nella pagina dell'ETF ("+10 quote", sotto "pagati 501,00 €").
+function etfTradeRow(ctx, m, { accountId, etfId }) {
+  const state = ctx.store.getState();
+  const buy = m.trade === 'compra';
+  const qty = buy ? m.amountTo : m.amount;
+  const eurId = buy ? m.accountId : m.toAccountId;
+  const sub = [`${qtyText(qty)} × ${formatPrice4(m.price)}`];
+  if (!accountId) sub.push(C.accountLabel(state, eurId));
+  let value;
+  let valueSub = null;
+  let valueClass = '';
+  if (etfId) {
+    value = `${buy ? '+' : '-'}${qtyText(qty)}`;
+    valueSub = buy ? `pagati ${formatEuro(m.amount)}` : `arrivati ${formatEuro(m.amountTo)}`;
+    if (buy) valueClass = 'is-income';
+  } else if (accountId) {
+    const eff = C.movementEffect(m, accountId);
+    value = formatEuroSigned(eff);
+    if (eff > 0) valueClass = 'is-income';
+  } else {
+    value = buy ? formatEuro(-m.amount) : formatEuroSigned(m.amountTo);
+    valueClass = 'is-muted';
+  }
+  const extras = m.note ? [el('span', { attrs: { 'aria-label': 'Con nota', title: m.note } }, icon('note'))] : [];
+  return row({
+    icon: buy ? 'down' : 'up', color: etfOf(state, m.etfId)?.color || C.movementColor(state, m), title: movementTitle(state, m),
+    subtitle: [el('span', { text: sub.join(' · ') }), ...extras], value, valueSub, valueClass, chevron: false,
+    attrs: { 'data-movement': m.id },
+    onClick: () => openMovementForm(ctx, { movement: ctx.store.find('movement', m.id) }),
+  });
+}
+
+// Riga di un movimento; con accountId mostra l'effetto su quel conto, con etfId (pagina dell'ETF) le quote.
+export function movementRow(ctx, m, { accountId = null, etfId = null } = {}) {
+  if (m.etfId && C.isTrade(m)) return etfTradeRow(ctx, m, { accountId, etfId });
   const state = ctx.store.getState();
   const sub = [];
   if (C.isTrade(m)) {

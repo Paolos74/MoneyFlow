@@ -47,7 +47,7 @@ function fakeFirebase({ now }) {
       assert.ok(body.writes.length <= 250, 'al massimo 250 scritture');
       srv.commits.push(body.writes.length);
       for (const w of body.writes) {
-        assert.match(w.update.name, /^projects\/progetto\/databases\/\(default\)\/documents\/users\/u1\/records\/(account|category|movement|scheduled|goal)_/);
+        assert.match(w.update.name, /^projects\/progetto\/databases\/\(default\)\/documents\/users\/u1\/records\/(account|category|movement|scheduled|goal|investment)_/);
         assert.deepEqual(w.updateTransforms, [{ fieldPath: 'syncedAt', setToServerValue: 'REQUEST_TIME' }]);
         srv.docs.set(w.update.name, { name: w.update.name, fields: { ...w.update.fields, syncedAt: { timestampValue: nextTs() } } });
       }
@@ -87,7 +87,7 @@ test('accesso, push e pull tra due dispositivi, password mai salvata', async () 
   const A = device(srv, 'a', now);
   const acc = A.store.addAccount({ name: 'Revolut', kind: 'eur', initial: 100, color: PALETTE[0] });
   const r = await A.sync.signIn('ada@example.it', 'segreta-lunga');
-  assert.deepEqual([r.ok, r.pushed], [true, 15]); // 14 categorie iniziali (v4: + Interessi) + 1 conto
+  assert.deepEqual([r.ok, r.pushed], [true, 16]); // 15 categorie iniziali (v4: + Interessi, v5: + Dividendi) + 1 conto
   assert.ok(!A.storage.getItem(SYNC_KEY).includes('segreta-lunga'));
   assert.equal(A.sync.status().pending, 0);
 
@@ -135,7 +135,7 @@ test('categorie predefinite: un secondo dispositivo non le raddoppia e la modifi
 
   for (const D of [A, B]) {
     const live = D.store.getState().categories.filter((c) => !c.deleted);
-    assert.equal(live.length, 14);
+    assert.equal(live.length, 15);
     assert.equal(live.filter((c) => c.name === 'Casa').length, 1);
     assert.equal(D.store.find('category', casaA.id).budget, 30000, 'budget di A conservato');
   }
@@ -155,15 +155,15 @@ test('600 modifiche → 3 commit da 250/250/100 e pull a pagine', async () => {
   const A = device(srv, 'a', now);
   const acc = A.store.addAccount({ name: 'Conto', kind: 'eur', initial: 0, color: PALETTE[0] });
   const cat = A.store.getState().categories[0].id;
-  for (let i = 0; i < 585; i++) A.store.addMovement({ type: 'uscita', date: '2025-01-01', amount: i + 1, accountId: acc.id, categoryId: cat });
-  // 14 categorie (v4: + Interessi) + 1 conto + 585 movimenti = 600
+  for (let i = 0; i < 584; i++) A.store.addMovement({ type: 'uscita', date: '2025-01-01', amount: i + 1, accountId: acc.id, categoryId: cat });
+  // 15 categorie (v4: + Interessi, v5: + Dividendi) + 1 conto + 584 movimenti = 600
   await A.sync.signIn('ada@example.it', 'segreta-lunga');
   assert.deepEqual(srv.commits, [250, 250, 100]);
   const B = device(srv, 'b', now);
   srv.queries = 0;
   await B.sync.signIn('ada@example.it', 'segreta-lunga');
   assert.ok(srv.queries >= 3, 'pull in più pagine da 300');
-  assert.equal(B.store.getState().movements.length, 585);
+  assert.equal(B.store.getState().movements.length, 584);
 });
 
 test('token scaduto: rinnovo automatico; rinnovo impossibile → sessione chiusa, dati tenuti', async () => {
@@ -243,5 +243,36 @@ test('esci: token cancellati, dati locali tenuti', async () => {
   const saved = JSON.parse(A.storage.getItem(SYNC_KEY));
   assert.equal(saved.refreshToken, '');
   assert.equal(saved.idToken, '');
-  assert.equal(A.store.getState().categories.length, 14);
+  assert.equal(A.store.getState().categories.length, 15);
+});
+
+test('v5: un ETF viene inviato come investment_<id> e applicato sull\'altro dispositivo', async () => {
+  const now = clock();
+  const srv = fakeFirebase({ now });
+  const A = device(srv, 'a', now);
+  const etf = A.store.addInvestment({ name: 'ETF Mondo prova', color: PALETTE[9] });
+  await A.sync.signIn('ada@example.it', 'segreta-lunga');
+  assert.ok([...srv.docs.keys()].some((k) => k.endsWith(`/records/investment_${etf.id}`)));
+  const B = device(srv, 'b', now);
+  await B.sync.signIn('ada@example.it', 'segreta-lunga');
+  assert.equal(B.store.find('investment', etf.id).name, 'ETF Mondo prova');
+  assert.equal(JSON.parse(B.storage.getItem('moneyflow:investments')).investments.length, 1);
+});
+
+test('v5: il cursore di un telefono che era in v4 si azzera una sola volta', () => {
+  const storage = memoryStorage({ [SYNC_KEY]: JSON.stringify({ uid: 'u1', refreshToken: 'rt', cursor: { time: '2025-01-01T00:00:00.000Z', name: 'x' }, dirty: {} }) });
+  const store = createStore({ storage, now: clock(), uuid: seqUuid() });
+  const mk = () => createSync({ store, storage, now: clock(), config: CFG, fetch: async () => { throw new TypeError('offline'); }, setTimer: () => 0, clearTimer: () => {} });
+  mk();
+  let saved = JSON.parse(storage.getItem(SYNC_KEY));
+  assert.deepEqual([saved.cursor, saved.resyncV5], [null, true]);
+  saved.cursor = { time: '2025-02-01T00:00:00.000Z', name: 'y' };
+  storage.setItem(SYNC_KEY, JSON.stringify(saved));
+  mk();
+  saved = JSON.parse(storage.getItem(SYNC_KEY));
+  assert.deepEqual(saved.cursor, { time: '2025-02-01T00:00:00.000Z', name: 'y' });
+  // un dispositivo nuovo non scrive nulla all'avvio
+  const fresh = memoryStorage();
+  createSync({ store: createStore({ storage: fresh, now: clock(), uuid: seqUuid() }), storage: fresh, now: clock(), config: CFG, fetch: async () => ({}), setTimer: () => 0, clearTimer: () => {} });
+  assert.equal(fresh.getItem(SYNC_KEY), null);
 });

@@ -204,7 +204,7 @@ async function importFile(ctx, file, inputEl) {
   const s = backupSummary(data);
   const ok = await confirmDialog({
     title: 'Importare questo backup?',
-    message: `${s.accounts} conti, ${s.movements} movimenti, ${s.categories} categorie, ${s.scheduled} programmati, ${s.goals} obiettivi. I dati attuali saranno sostituiti (ne viene salvata una copia).`,
+    message: `${s.accounts} conti, ${s.movements} movimenti, ${s.categories} categorie, ${s.scheduled} programmati, ${s.goals} obiettivi${s.investments ? `, ${s.investments} ETF` : ''}. I dati attuali saranno sostituiti (ne viene salvata una copia).`,
     confirmLabel: 'Importa', destructive: true,
   });
   if (!ok) return;

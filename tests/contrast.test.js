@@ -1,4 +1,4 @@
-// Contrasto WCAG 2.x della palette v4: legge i token dai blocchi di css/app.css (chiaro, scuro, automatico scuro)
+// Contrasto WCAG 2.x della palette v4 (v5: colore progressivo): legge i token dai blocchi di css/app.css (chiaro, scuro, automatico scuro)
 // e calcola i rapporti delle coppie usate dall'interfaccia. Testo ≥ 4,5:1; icone, barre e anelli ≥ 3:1.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -35,6 +35,19 @@ export function ratio(a, b) {
 
 const TINTS = ['accent', 'teal', 'indigo', 'violet', 'amber', 'pink', 'butter', 'danger'];
 const fillOf = (T, k) => (k === 'accent' ? T['accent-fill'] : k === 'danger' ? null : T[`${k}-fill`]);
+
+// Miscela sRGB di due colori con peso t della seconda: round(b × t + a × (1 − t)) per canale.
+export const mix = (a, b, t) => a.map((v, i) => Math.round(b[i] * t + v * (1 - t)));
+const PROG = [0, 1, 2, 3];
+// Le 4 tappe e le miscele a passi di 1 % dei tratti 0→1, 1→2, 2→3 (303 colori per tema).
+function progColors(T) {
+  const out = PROG.map((k) => [`prog-${k}`, hex(T[`prog-${k}`])]);
+  for (let k = 0; k < 3; k++) {
+    const a = hex(T[`prog-${k}`]); const b = hex(T[`prog-${k + 1}`]);
+    for (let t = 0; t <= 100; t++) out.push([`miscela prog-${k}→${k + 1} al ${t}%`, mix(a, b, t / 100)]);
+  }
+  return out;
+}
 
 // Coppie [descrizione, primo piano, sfondo, minimo] per un tema.
 function pairs(T) {
@@ -78,6 +91,16 @@ function pairs(T) {
       }
     });
   }
+  // v5: colore progressivo di "Quanto ti resta" (numero, "Hai sforato di", anello) su ogni tappa del fondo menta,
+  // alle 4 tappe e a ogni 1 % di miscela tra due tappe (come color-mix(in srgb), canali arrotondati agli interi).
+  const heroStops = stops(T['hero-left-bg']);
+  heroStops.forEach((st, i) => {
+    const track = over(ringTrack.c, ringTrack.a, st);
+    for (const [label, c] of progColors(T)) {
+      add(`Quanto ti resta tappa ${i + 1}: ${label}, testo`, c, st, 4.5);
+      add(`Quanto ti resta tappa ${i + 1}: ${label}, anello sulla traccia`, c, track, 3);
+    }
+  });
   add('barra uscite del grafico su surface', hex(T['chart-expense']), surface, 3);
   add('barra entrate del grafico su surface', hex(T.income), surface, 3);
   add('scheda attiva: verde su tinta tenue', hex(T.accent), hex(T['accent-soft']), 4.5);
@@ -103,6 +126,15 @@ for (const [name, T] of [['chiaro', LIGHT], ['scuro', DARK]]) {
 if (process.argv.includes('--table')) {
   console.log('| Tema | Coppia | Rapporto | Minimo |\n|---|---|---|---|');
   for (const [name, T] of [['chiaro', LIGHT], ['scuro', DARK]]) {
-    for (const [what, fg, bg, need] of pairs(T)) console.log(`| ${name} | ${what} | ${ratio(fg, bg).toFixed(2).replace('.', ',')}:1 | ${need}:1 |`);
+    for (const [what, fg, bg, need] of pairs(T)) if (!what.includes('miscela')) console.log(`| ${name} | ${what} | ${ratio(fg, bg).toFixed(2).replace('.', ',')}:1 | ${need}:1 |`);
+  }
+  // Minimo delle miscele di ogni tratto (testo e anello) sulle tre tappe del fondo.
+  console.log('\n| Tema | Tratto | Minimo testo | Minimo anello sulla traccia |\n|---|---|---|---|');
+  for (const [name, T] of [['chiaro', LIGHT], ['scuro', DARK]]) {
+    for (let k = 0; k < 3; k++) {
+      const ps = pairs(T).filter(([w]) => w.includes(`miscela prog-${k}→${k + 1} `));
+      const min = (kind) => Math.min(...ps.filter(([w]) => w.endsWith(kind)).map(([, fg, bg]) => ratio(fg, bg))).toFixed(2).replace('.', ',');
+      console.log(`| ${name} | prog-${k}→${k + 1} | ${min('testo')}:1 | ${min('traccia')}:1 |`);
+    }
   }
 }

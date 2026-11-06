@@ -102,3 +102,51 @@ test('v4 parsePercentInput con max: ritenuta fino al 100 %, tasso fino al 20 %',
   assert.equal(parsePercentInput('21', { max: 2000 }), null);
   assert.equal(parsePercentInput('100'), null, 'senza max resta al 10 %');
 });
+
+// v5: importi degli ETF, esempi E4 ed E5 del piano calcolati a mano.
+import { parsePrice4Input, formatPrice4, formatPrice4Plain, etfTradeCents, proportionalCents, avgPrice4, taxCents, formatPercentSigned, formatRateBp } from '../js/money.js';
+
+test('v5 prezzo per quota a 4 decimali: lettura e scrittura', () => {
+  assert.equal(parsePrice4Input('52,1333'), 521333);
+  assert.equal(parsePrice4Input('56'), 560000);
+  assert.equal(parsePrice4Input('56,5'), 565000);
+  assert.equal(parsePrice4Input('1.250,1234'), 12501234);
+  assert.equal(parsePrice4Input('1,23456'), null);
+  assert.equal(parsePrice4Input('-5'), null);
+  assert.equal(parsePrice4Input('abc'), null);
+  assert.equal(formatPrice4(521333), `52,1333${NB}€`);
+  assert.equal(formatPrice4(585000), `58,50${NB}€`);
+  assert.equal(formatPrice4(12501230), `1.250,123${NB}€`);
+  assert.equal(formatPrice4Plain(500000), '50,00');
+  assert.equal(formatPrice4Plain(521333), '52,1333');
+});
+
+test('v5 E4: importi, costo delle quote vendute, prezzo medio e tassa', () => {
+  assert.equal(etfTradeCents(10e8, 500000), 50000); // 10 × 50,0000 = 500,00
+  assert.equal(etfTradeCents(5e8, 560000), 28000); // 5 × 56,0000 = 280,00
+  assert.equal(etfTradeCents(6e8, 600000), 36000); // 6 × 60,0000 = 360,00
+  assert.equal(etfTradeCents(9e8, 585000), 52650); // 9 × 58,50 = 526,50
+  assert.equal(etfTradeCents(0, 500000), null);
+  assert.equal(proportionalCents(78200, 6e8, 15e8), 31280); // 782,00 × 6 ÷ 15 = 312,80
+  assert.equal(avgPrice4(78200, 15e8), 521333); // 782,00 ÷ 15 = 52,1333
+  assert.equal(avgPrice4(46920, 9e8), 521333); // 469,20 ÷ 9 = 52,1333
+  assert.equal(avgPrice4(0, 0), 0);
+  assert.equal(taxCents(4620, 2600), 1201); // 46,20 × 26 % = 12,012 → 12,01
+});
+
+test('v5 E5: aliquota ridotta, perdita, dividendo', () => {
+  assert.equal(taxCents(4620, 1875), 866); // 8,6625 → 8,66
+  assert.equal(taxCents(-2580, 2600), 0);
+  assert.equal(taxCents(0, 2600), 0);
+  assert.equal(taxCents(3000, 2600), 780); // 30,00 × 26 % = 7,80
+});
+
+test('v5 percentuali con segno e aliquote', () => {
+  assert.equal(formatPercentSigned(480), '+48,0%');
+  assert.equal(formatPercentSigned(0), '0,0%');
+  assert.equal(formatPercentSigned(-34), '-3,4%');
+  assert.equal(formatRateBp(2600), '26%');
+  assert.equal(formatRateBp(1875), '18,75%');
+  assert.equal(formatRateBp(1250), '12,50%');
+  assert.equal(formatRateBp(0), '0%');
+});
