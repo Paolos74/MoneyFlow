@@ -57,3 +57,13 @@ test('periodi a cavallo d\'anno', () => {
   assert.ok(D.periodRange('custom', t, { from: '2024-06-01', to: '2024-05-10' }).error);
   assert.deepEqual(D.periodRange('sconosciuto', '2024-02-10'), { from: '2024-02-01', to: '2024-02-29' });
 });
+
+test('v8 rangeLabel: periodo leggibile del pulsante Filtri di Movimenti', () => {
+  assert.equal(D.rangeLabel('2026-11-01', '2026-11-30'), 'Novembre 2026');
+  assert.equal(D.rangeLabel('2026-09-01', '2026-11-30'), 'Settembre – Novembre 2026');
+  assert.equal(D.rangeLabel('2025-11-01', '2026-01-31'), 'Novembre 2025 – Gennaio 2026');
+  assert.equal(D.rangeLabel('2026-01-01', '2026-12-31'), 'Anno 2026');
+  assert.equal(D.rangeLabel('2026-11-03', '2026-11-15'), '03/11/2026 – 15/11/2026');
+  assert.equal(D.rangeLabel('2026-11-03', '2026-11-03'), '03/11/2026');
+  assert.equal(D.rangeLabel('', '2026-11-03'), '');
+});

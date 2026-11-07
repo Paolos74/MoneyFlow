@@ -8,6 +8,7 @@ const P = {
   wallet: '<rect x="3" y="6" width="18" height="13.5" rx="3"/><path d="M3 10h18"/><path d="M16 14.5h2"/><path d="M6 6 15.5 3.5 17 6"/>',
   plus: '<path d="M12 5v14M5 12h14"/>',
   gear: '<circle cx="12" cy="12" r="3"/><path d="M12 2.8v2.4M12 18.8v2.4M2.8 12h2.4M18.8 12h2.4M5.5 5.5l1.7 1.7M16.8 16.8l1.7 1.7M5.5 18.5l1.7-1.7M16.8 7.2l1.7-1.7"/><circle cx="12" cy="12" r="6.5"/>',
+  filter: '<path d="M4 7h16M7 12h10M10 17h4"/>',
   search: '<circle cx="10.5" cy="10.5" r="6.5"/><path d="m15.5 15.5 5 5"/>',
   chevron: '<path d="m9 5 7 7-7 7"/>',
   back: '<path d="m15 5-7 7 7 7"/>',

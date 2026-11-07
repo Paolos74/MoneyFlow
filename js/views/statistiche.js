@@ -1,12 +1,16 @@
 // Statistiche: ciambella delle uscite per categoria, barre entrate/uscite per mese, linea del
 // patrimonio, tasso di risparmio per mese, riepilogo abbonamenti, accesso a Stipendio e tasse e al fondo pensione.
+// v8 (modifica 9): card "Messo da parte nel periodo" (periodo di budget, come la Home); #statistiche?blocco=da-parte
+// scorre fino a lì.
 
 import { el, card, list, row, svgNode, emptyState, section } from '../ui.js';
-import { formatEuro, formatPercent } from '../money.js';
-import { monthOf, monthsBetween, addMonthsYM, monthShortLabel, monthLabel, monthStart, monthEnd } from '../dates.js';
+import { formatEuro, formatEuroSigned, formatPercent } from '../money.js';
+import { monthOf, monthsBetween, addMonthsYM, monthShortLabel, monthLabel, monthStart, monthEnd, MONTHS, parseISO } from '../dates.js';
 import { donut, bars, line } from '../charts.js';
 import * as C from '../calc.js';
 import { periodPicker, scheduledTitle } from './parts.js';
+import { budgetPeriod, savedInPeriod } from '../period.js';
+import { periodText } from './budget.js';
 import { freqLabel } from '../recurrence.js';
 
 let period = null;
@@ -44,6 +48,30 @@ export function render(root, ctx) {
       el('div', { class: 'stat stat--expense' }, el('div', { class: 'stat__label', text: 'Uscite' }), el('div', { class: 'stat__value', id: 'st-expense', text: formatEuro(t.expense) })),
       el('div', { class: 'stat stat--rate' }, el('div', { class: 'stat__label', text: 'Risparmio' }), el('div', { class: `stat__value ${t.rate < 0 ? 'is-danger' : ''}`, id: 'st-rate', text: formatPercent(t.rate) }))),
     el('p', { class: 'hero__sub', text: 'Uscite al netto delle quote escluse. Trasferimenti e restituzioni non contano.' })));
+
+  // Messo da parte nel periodo (v8, modifica 9): il dettaglio del riquadro della Home, stessi numeri di
+  // savedInPeriod sul periodo di budget (non sul periodo scelto sopra). Nascosta senza entrate, uscite e da pagare.
+  const bp = budgetPeriod(state, today, ctx.prefs.get().budgetPeriod);
+  const sv = savedInPeriod(state, bp, today);
+  if (sv.income > 0 || sv.expense > 0 || sv.planned > 0) {
+    const kv = (label, value, id, cls = '', rowCls = '') => el('div', { class: 'kv ' + rowCls }, el('span', { text: label }), el('span', { class: cls, id, text: value }));
+    const goalsLabel = bp.mode === 'salary' ? `Negli obiettivi di ${MONTHS[parseISO(bp.from).m - 1]}` : 'Negli obiettivi';
+    const savedCard = card({ title: 'Messo da parte nel periodo', tint: 'pink', icon: 'piggy', id: 'st-saved', cls: 'card--saved-detail' },
+      el('p', { class: 'hero__label', id: 'st-saved-period', text: `Periodo di budget: ${periodText(bp)} · stima a fine periodo` }),
+      el('div', { class: 'saved__kv' },
+        kv('Entrate', formatEuro(sv.income), 'st-saved-income', 'is-income'),
+        kv('Uscite', formatEuro(sv.expense), 'st-saved-expense'),
+        kv('Da pagare', formatEuro(sv.planned), 'st-saved-planned'),
+        kv(sv.income > 0 && sv.net >= 0 ? `Messo da parte · ${formatPercent(sv.rate)} delle entrate` : 'Messo da parte', formatEuroSigned(sv.net), 'st-saved-net', sv.net < 0 ? '' : 'is-income', 'kv--total'),
+        kv(goalsLabel, formatEuro(sv.goals), 'st-saved-goals'),
+        kv('Verso deposito e investimenti', formatEuro(sv.moved), 'st-saved-moved')),
+      el('p', { class: 'hero__sub', text: 'Entrate meno uscite e pagamenti programmati ancora da pagare nel periodo. Obiettivi e deposito non si tolgono: dicono dove hai messo una parte di quello che risparmi.' }));
+    root.append(savedCard);
+    if (ctx.query.blocco === 'da-parte') {
+      ctx.setQuery({ periodo: period.key, da: period.key === 'custom' ? period.from : '', a: period.key === 'custom' ? period.to : '' });
+      requestAnimationFrame(() => document.getElementById('st-saved')?.scrollIntoView({ block: 'start' }));
+    }
+  }
 
   // Ciambella
   const cats = C.byCategory(state, from, to, 'uscita');

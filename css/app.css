@@ -43,6 +43,7 @@
   --pink: #BE185D; --pink-fill: #BE185D; --pink-soft: #FBE3ED;
   --butter: #875200; --butter-fill: #A16207; --butter-soft: #FBF1CF;
   --chart-expense: #E5484D;
+  --risk-bar: #B45309;
   --segment-on: #FFFFFF;
   --bar-bg: rgba(252, 251, 248, 0.84);
   --shadow: 0 1px 2px rgba(40, 32, 16, 0.04), 0 6px 20px rgba(40, 32, 16, 0.06);
@@ -80,6 +81,7 @@
   --pink: #F9A8D4; --pink-fill: #BE185D; --pink-soft: #42253A;
   --butter: #FCD34D; --butter-fill: #A16207; --butter-soft: #3B3215;
   --chart-expense: #FF6B5E;
+  --risk-bar: #FBBF24;
   --segment-on: #545458;
   --bar-bg: rgba(26, 27, 30, 0.84);
   --shadow: 0 1px 2px rgba(0, 0, 0, 0.4);
@@ -116,6 +118,7 @@
     --pink: #F9A8D4; --pink-fill: #BE185D; --pink-soft: #42253A;
     --butter: #FCD34D; --butter-fill: #A16207; --butter-soft: #3B3215;
     --chart-expense: #FF6B5E;
+    --risk-bar: #FBBF24;
     --segment-on: #545458;
     --bar-bg: rgba(26, 27, 30, 0.84);
     --shadow: 0 1px 2px rgba(0, 0, 0, 0.4);
@@ -326,9 +329,6 @@ textarea.input { min-height: 72px; resize: vertical; line-height: 1.4; }
 .range { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin: 0 0 8px; }
 .range .field { background: var(--surface); border-radius: var(--radius-sm); }
 .form-error { color: var(--danger); background: var(--danger-soft); border-radius: var(--radius-sm); padding: 10px 14px; margin: 0 0 16px; font-size: 15px; }
-.filters { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin: 0 0 12px; }
-.filters .select-wrap { background: var(--surface); border-radius: 12px; padding: 0 12px; }
-.filters .input { min-height: 40px; font-size: 15px; }
 
 /* Interruttore */
 .switch { position: relative; width: 51px; height: 31px; flex: none; }
@@ -764,16 +764,8 @@ a.meter.meter--cat, .meter--cat { display: flex; gap: 12px; align-items: center;
 .advice__row { display: grid; grid-template-columns: 16px 1fr auto; gap: 8px; align-items: center; min-height: 44px; padding: 6px 0; text-decoration: none; color: var(--muted); }
 .advice__row:active { opacity: .6; }
 .advice__icon { display: grid; place-items: center; color: var(--muted); }
-.advice__text { font-size: 13px; line-height: 1.4; color: var(--muted); min-width: 0; overflow: hidden; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; }
+.advice__text { font-size: 13px; line-height: 1.4; color: var(--muted); min-width: 0; overflow-wrap: break-word; }
 .advice__action { font-size: 13px; font-weight: 600; color: var(--accent); white-space: nowrap; display: inline-flex; align-items: center; gap: 2px; }
-
-/* "Quanto metti da parte": card bianca, numero grande ma più piccolo del protagonista, negativo nel colore del testo. */
-.card .saved__value { font-family: var(--font-num); font-size: 30px; line-height: 1.15; font-weight: 700; margin: 2px 0; white-space: nowrap; font-variant-numeric: tabular-nums; color: var(--income); }
-.card .saved__value.is-long { font-size: 26px; }
-.card .saved__value.is-neg { color: var(--text); }
-.card--saved .hero__label { font-size: 14px; margin: 0 0 2px; }
-.card--saved .hero__sub { font-size: 14px; margin: 0 0 4px; }
-.card--saved .kv span.is-muted { color: var(--muted); }
 
 /* Investimenti: guadagno in % sotto il valore della riga, verde o rosso. */
 .row__value small.is-income { color: var(--income); }
@@ -791,52 +783,12 @@ a.meter.meter--cat, .meter--cat { display: flex; gap: 12px; align-items: center;
 
 /* ---- Design v6 UX (proposte 1–10, approvate in prova): Home più leggera. Solo aspetto e disposizione. ---- */
 
-/* 1. Promemoria backup: una riga sotto Quanto ti resta, icona ambra, testo grigio, azione verde. */
+/* 1. Promemoria backup (dalla v8 in fondo alla Home): icona ambra, testo grigio, azione verde. */
 .notice-row { display: grid; grid-template-columns: 18px 1fr auto; gap: 8px; align-items: center; min-height: 48px; padding: 6px 16px; margin: 0 0 16px; background: var(--surface); border-radius: var(--radius); box-shadow: var(--shadow); text-decoration: none; color: var(--muted); }
 .notice-row:active { opacity: .6; }
 .notice-row__icon { display: grid; place-items: center; color: var(--amber); }
 .notice-row__text { font-size: 13px; line-height: 1.35; color: var(--muted); min-width: 0; }
 .notice-row__action { font-size: 13px; font-weight: 600; color: var(--accent); white-space: nowrap; display: inline-flex; align-items: center; gap: 2px; }
-
-/* 2. Scomposizione su una riga: tre colonne senza riquadro, filo sottile sopra. */
-.card--remaining .stats--line { flex-wrap: nowrap; gap: 8px; border-top: 0.5px solid var(--separator); padding-top: 10px; margin-top: 2px; }
-.card--remaining .stats--line .stat { flex: 1 1 0; min-width: 0; background: none; border-radius: 0; padding: 0; }
-.stats--line .stat__label { font-size: 13px; margin: 0 0 1px; }
-.stats--line .stat__value { font-size: 15px; overflow: hidden; text-overflow: ellipsis; }
-
-/* 4. Puoi spendere oggi compatto (solo Home): importo a destra a 22 px. */
-.today-box--compact { align-items: center; gap: 10px; padding: 10px 12px; margin: 10px 0 12px; }
-.card .today-box--compact .today-box__label { white-space: nowrap; }
-.today-box--compact .today-box__icon { width: 32px; height: 32px; }
-.card .today-box--compact .today-box__value { flex: none; font-size: 22px; margin: 0; }
-
-/* 5. Quanto metti da parte compatto: importo accanto al titolo, una riga grigia di dettaglio. */
-.card--saved-compact .card__head { margin-bottom: 6px; }
-.saved__head { display: inline-flex; align-items: center; gap: 4px; flex: none; }
-.card--saved-compact .saved__value { margin: 0; font-family: var(--font-num); font-size: 22px; line-height: 1.2; font-weight: 700; white-space: nowrap; font-variant-numeric: tabular-nums; color: var(--income); }
-.card--saved-compact .saved__value.is-neg { color: var(--text); }
-.card .saved__line { font-size: 14px; line-height: 1.45; color: var(--muted); margin: 0; }
-.card--saved-compact:active { opacity: .7; }
-
-/* 6. Da confermare in Home: una riga per voce, Conferma piccolo a destra (bersaglio 44 px). */
-.row--pending { padding: 0 16px 0 0; gap: 8px; }
-.row--pending .row__value { max-width: none; }
-/* Data e conto interi: il sottotitolo va a capo tra le parole invece di finire con i puntini (review U1, U2).
-   La riga si stringe sempre dentro la card (min-width: 0, review U3); break-word spezza solo una parola
-   più larga dell'intera colonna. Lo spazio dopo "14/11 ·" sta fuori dalla data (nowrap), così si va a capo
-   prima del conto invece di spezzarlo. Il titolo resta su una riga con "…". */
-.row--pending .row__sub { overflow: visible; overflow-wrap: break-word; }
-.row--pending .row__date { white-space: nowrap; }
-.row__hit { flex: 1; min-width: 0; display: flex; align-items: center; gap: 10px; min-height: 60px; padding: 8px 0 8px 16px; background: none; border: 0; text-align: left; color: inherit; font: inherit; }
-.row__hit:active { opacity: .6; }
-.row--pending .btn--small { flex: none; min-height: 44px; padding: 0 12px; }
-
-/* 7. Card Pagamenti programmati: etichetta "Da confermare (N)", "Vedi tutte" in fondo a destra. */
-.card .card__label { font-size: 13px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: .02em; margin: 0 0 2px; }
-.card__foot { display: flex; justify-content: flex-end; }
-.card__foot .card__link { min-height: 44px; padding: 10px 0 0 8px; }
-.advice--plain { margin-top: 0; border-top: 0; padding-top: 0; }
-button.advice__row { width: 100%; background: none; border: 0; font: inherit; text-align: left; }
 
 @media (prefers-contrast: more) {
   .notice-row { border: 1px solid var(--separator); }
@@ -871,3 +823,110 @@ button.meter { width: 100%; background: none; border: 0; padding: 10px 0; margin
 .dialog__actions--stacked button + button { border-left: 0; border-top: 0.5px solid var(--separator); }
 /* v7: con le barre di scorrimento del computer ⚙︎ resta allo stesso posto anche nelle pagine corte */
 html { scrollbar-gutter: stable; }
+
+/* v8: Movimenti, pulsante Filtri con badge, periodo leggibile, chip rimovibili e riepilogo in una riga */
+.mov-filterbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 0 0 8px; }
+.filter-btn { flex: none; min-height: 44px; background: var(--surface); color: var(--accent); box-shadow: var(--shadow); }
+.filter-badge { display: inline-grid; place-items: center; min-width: 20px; height: 20px; padding: 0 6px; border-radius: 10px; background: var(--accent-fill); color: var(--on-accent); font-size: 13px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.filter-period { font-size: 15px; font-weight: 600; color: var(--text); padding: 0 4px; }
+.chip--filter { min-height: 36px; padding: 0 10px 0 12px; font-size: 15px; }
+.chip--filter svg { width: 14px; height: 14px; color: var(--muted); flex: none; }
+.mov-filters > .field__error { margin: 0 0 8px; }
+.mov-summary { margin: 0 0 12px; padding: 0 4px; font-size: 15px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.filter-sheet__period { margin: 0 0 20px; }
+.filter-sheet__period .chips--wrap { margin: 0 0 8px; }
+.filter-sheet__actions { display: grid; gap: 8px; margin: 0 0 8px; }
+
+/* ---- v8: nuova Home "Cruscotto a riquadri" (alternativa B, modifiche 1–9, 12–19) ---- */
+/* Intestazione comune: titolo grigio, piccolo riquadro icona colorato, › a destra (modifiche 7 e 18). */
+.tile__head { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin: -2px 0 8px; }
+.tile__title { display: flex; align-items: center; gap: 8px; min-width: 0; font-size: 15px; font-weight: 600; color: var(--muted); }
+.mini-badge { flex: none; width: 22px; height: 22px; border-radius: 7px; display: grid; place-items: center; color: #fff; }
+.mini-badge svg { width: 14px; height: 14px; }
+.mini-badge--violet { background: var(--violet-fill); }
+.mini-badge--pink { background: var(--pink-fill); }
+.mini-badge--amber { background: var(--amber-fill); }
+.mini-badge--teal { background: var(--teal-fill); }
+.mini-badge--emerald { background: var(--accent-fill); }
+.tile__head .row__chev svg { width: 13px; height: 13px; }
+a.card:active, a.tile:active { opacity: .7; }
+
+/* Quanto ti resta (modifiche 3, 4, 6, 7): fondo neutro, unico numero grande nel carattere dei numeri. */
+.card.hhero { padding: 16px 18px 14px; }
+.hhero .hero__value { font-size: 44px; font-weight: 700; margin: 0 0 2px; white-space: nowrap; overflow-wrap: normal; }
+.hhero .hero__value.is-long { font-size: 34px; }
+.card .hhero__sub { margin: 0; font-size: 14px; color: var(--muted); }
+.hhero .remaining__over { margin: 0 0 2px; }
+.hhero .remaining__over .hero__value { display: block; margin: 0; }
+.hhero__today { display: flex; align-items: center; gap: 10px; margin: 12px 0 0; padding: 10px 0 0; border-top: 0.5px solid var(--separator); }
+.hhero__today-icon { flex: none; width: 28px; height: 28px; border-radius: 50%; display: grid; place-items: center; background: var(--accent-fill); color: var(--on-accent); }
+.hhero__today-label { flex: 1; min-width: 0; font-weight: 600; font-size: 15px; color: var(--text); }
+.hhero__today-value { flex: none; font-size: 22px; font-weight: 700; color: var(--text); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.card .hhero__line { margin: 8px 0 0; font-size: 12px; line-height: 1.5; color: var(--muted); font-variant-numeric: tabular-nums; }
+.hhero__piece { white-space: nowrap; }
+
+/* Riquadri in due colonne (P1: valore e al massimo due righe brevi; il testo va a capo, mai tagliato). */
+.tiles { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin: 0 0 16px; }
+.tile { position: relative; display: block; color: inherit; text-decoration: none; background: var(--surface); border-radius: var(--radius); box-shadow: var(--shadow); padding: 12px 12px 26px 14px; min-height: 112px; min-width: 0; overflow-wrap: break-word; }
+.tile--wide { grid-column: 1 / -1; min-height: 0; }
+.tile .tile__title { font-size: 13px; gap: 6px; }
+.tile .mini-badge { width: 20px; height: 20px; }
+.tile > .tile__head > .row__chev { position: absolute; right: 12px; bottom: 10px; }
+/* Riquadro largo: › in alto a destra come le card larghe, niente riga vuota sotto la barra. */
+.tile--wide { padding-bottom: 12px; }
+.tile--wide > .tile__head > .row__chev { position: static; }
+.tile__value { margin: 2px 0 2px; font-size: 17px; font-weight: 700; line-height: 1.2; color: var(--text); font-variant-numeric: tabular-nums; }
+.tile__value.is-risk { color: var(--amber); }
+.tile__value.is-danger { color: var(--danger); }
+.tile__line { margin: 0; font-size: 13px; line-height: 1.3; color: var(--muted); }
+.tile__goal { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+.tile__goal-name { font-weight: 600; min-width: 0; }
+.tile__goal-pct { flex: none; font-weight: 700; font-variant-numeric: tabular-nums; }
+/* Sotto 390 px (iPhone SE e mini, Android piccolo): anello più piccolo e riga del periodo a 13 px, così
+   "fino al … · ancora N giorni" sta su una riga. A 72 px "resta" sarebbe di 8,6 px: si toglie e la percentuale
+   torna al centro dell'anello (il significato resta nell'etichetta accessibile). */
+@media (max-width: 389px) {
+  .hhero .remaining__ring, .hhero .remaining__ring svg { width: 72px; height: 72px; }
+  .hhero .ring__sub { display: none; }
+  .hhero .ring__center { transform: translateY(4px); }
+  .card .hhero__sub { font-size: 13px; }
+}
+/* Schermi stretti (Android piccolo, 360 px): titolo e valore dei riquadri su una riga, numero grande accanto all'anello. */
+@media (max-width: 374px) {
+  .tile { padding-left: 12px; }
+  .tile__value { font-size: 15px; }
+  .hhero .hero__value { font-size: 36px; }
+  .hhero .hero__value.is-long { font-size: 28px; }
+}
+
+/* Dove spendi (modifica 14, P3): barra unica, speso pieno e da pagare tratteggiato; legenda in righe. */
+.stack { display: flex; height: 14px; border-radius: 7px; overflow: hidden; background: var(--surface-2); }
+.stack__seg { flex: none; width: var(--w); background: var(--c); box-shadow: inset -2px 0 0 var(--surface); }
+.stack__seg--planned { background: repeating-linear-gradient(135deg, var(--c) 0 3px, transparent 3px 6px); }
+.where__legend { list-style: none; margin: 8px 0 0; padding: 0; }
+.where__row { display: flex; align-items: baseline; gap: 8px; padding: 4px 0; font-size: 14px; }
+.where__row .chip__dot { align-self: center; }
+.where__name { flex: 1; min-width: 0; overflow-wrap: break-word; }
+.where__value { flex: none; font-variant-numeric: tabular-nums; color: var(--muted); white-space: nowrap; }
+.card .where__note { display: flex; align-items: center; gap: 8px; margin: 4px 0 0; font-size: 13px; color: var(--muted); }
+.where__key { flex: none; width: 18px; height: 10px; border-radius: 3px; border: 1px solid var(--muted); background: repeating-linear-gradient(135deg, var(--muted) 0 2px, transparent 2px 4px); }
+
+/* Ultimi movimenti (modifica 15): righe solo da leggere, tocca la card. */
+.hl-list { list-style: none; margin: 0; padding: 0; }
+.hl { display: flex; align-items: center; gap: 12px; min-height: 52px; padding: 6px 0; }
+.hl + .hl { border-top: 0.5px solid var(--separator); }
+.hl__main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.hl__title { font-size: 16px; line-height: 1.25; color: var(--text); overflow-wrap: break-word; }
+.hl__sub { font-size: 13px; color: var(--muted); }
+.hl__value { flex: none; font-variant-numeric: tabular-nums; white-space: nowrap; color: var(--text); }
+.hl__value.is-income { color: var(--income); }
+
+/* Budget, Piano (modifiche 1 e 2): "Andrà oltre" in ambra calmo, "Superato" in rosso; riga evidenziata dalla Home. */
+.meter.is-risk .meter__note { color: var(--amber); font-weight: 600; }
+.meter.is-risk .progress__fill { background: var(--risk-bar); }
+.meter.is-highlight { background: var(--amber-soft); border-radius: 14px; margin: 0 -8px; padding-left: 8px; padding-right: 8px; width: calc(100% + 16px); }
+#budget-plan, #st-saved { scroll-margin-top: calc(var(--topbar-h) + var(--safe-top) + 8px); }
+
+@media (prefers-contrast: more) {
+  .tile { border: 1px solid var(--separator); }
+}

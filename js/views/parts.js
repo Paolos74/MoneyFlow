@@ -1,7 +1,7 @@
 // Pezzi di interfaccia condivisi tra le viste: righe dei movimenti, gruppi per giorno,
 // programmati da confermare, selettore del periodo, riga di azioni sotto il titolo (v7).
 
-import { el, row, section, list, chips, field, input, icon, button, actionSheet } from '../ui.js';
+import { el, row, section, list, chips, field, input, icon, button } from '../ui.js';
 import { formatEuro, formatEuroSigned, formatQty, formatPrice4 } from '../money.js';
 import { etfOf, qtyText } from '../invest.js';
 import { formatDayHeader, formatDateIt, PERIODS, periodRange } from '../dates.js';
@@ -156,27 +156,11 @@ export function shortDate(iso, today) {
 }
 
 // Riga "da confermare": sopra titolo, data e importo; sotto i pulsanti Salta e Conferma.
-// compact (Home, UX v6 proposta 6): una riga sola con Conferma; il resto della riga apre il foglio d'azione
-// Conferma / Salta / Annulla.
-export function pendingRow(ctx, { sched, date }, idx = 0, { compact = false } = {}) {
+// (La riga compatta della Home v6 non c'è più: dalla v8 si conferma solo in Da confermare.)
+export function pendingRow(ctx, { sched, date }, idx = 0) {
   const state = ctx.store.getState();
   const where = sched.type === 'trasferimento' ? `${C.accountLabel(state, sched.accountId)} → ${C.accountLabel(state, sched.toAccountId)}` : C.accountLabel(state, sched.accountId);
   const confirm = () => openConfirmForm(ctx, ctx.store.find('scheduled', sched.id), date);
-  if (compact) {
-    const title = scheduledTitle(state, sched);
-    const amount = amountIn(state, sched.accountId, sched.amount);
-    return el('div', { class: 'row row--pending', attrs: { 'data-pending': `${sched.id}|${date}` } },
-      el('button', {
-        class: 'row__hit', type: 'button', id: `pending-${idx}`, attrs: { 'aria-label': `${title}, ${formatDateIt(date)}, ${where}, ${amount}: altre azioni` },
-        on: { click: () => actionSheet({ title: `${title} · ${amount} · ${where}`, actions: [{ label: 'Conferma', onClick: confirm }, { label: 'Salta', onClick: () => skipWithUndo(ctx, sched, date) }] }) },
-      },
-      el('span', { class: 'row__icon row__icon--planned', vars: { '--c': C.scheduledColor(state, sched) } }, icon('clock')),
-      el('span', { class: 'row__main' },
-        el('span', { class: 'row__title', text: title }),
-        el('span', { class: 'row__sub row__sub--wrap' }, el('span', { class: 'row__date', text: `${shortDate(date, ctx.today())} ·` }), ' ', el('span', { text: where }))),
-      el('span', { class: 'row__value row__value--strong', text: amount })),
-      button('Conferma', confirm, { kind: 'primary', small: true, id: `confirm-${idx}`, label: `Conferma ${title}` }));
-  }
   return el('div', { class: 'row row--stack', attrs: { 'data-pending': `${sched.id}|${date}` } },
     el('span', { class: 'row__icon row__icon--planned', vars: { '--c': C.scheduledColor(state, sched) } }, icon('clock')),
     el('span', { class: 'row__main' },
@@ -214,7 +198,8 @@ export function pendingGroupRow(ctx, { sched, items }, idx = 0) {
 }
 
 // Selettore del periodo (D8). state = { key, from, to }; "Personalizzato" parte dal periodo mostrato.
-export function periodPicker(ctx, st, onChange, idPrefix = 'p') {
+// v8: wrap = chip su più righe (foglio Filtri di Movimenti).
+export function periodPicker(ctx, st, onChange, idPrefix = 'p', { wrap: wrapChips = false } = {}) {
   const today = ctx.today();
   const range = periodRange(st.key, today, st);
   const wrap = el('div', { class: 'period' },
@@ -223,7 +208,7 @@ export function periodPicker(ctx, st, onChange, idPrefix = 'p') {
         const cur = periodRange(st.key, today, st);
         onChange({ key, from: cur.from, to: cur.to });
       } else onChange({ key });
-    }, { label: 'Periodo' }));
+    }, { label: 'Periodo', wrap: wrapChips }));
   if (st.key === 'custom') {
     const f = field({ label: 'Dal', id: `${idPrefix}-from`, input: input({ id: `${idPrefix}-from`, type: 'date', value: st.from || '', onInput: (v) => onChange({ ...st, from: v }) }) });
     const t = field({ label: 'Al', id: `${idPrefix}-to`, input: input({ id: `${idPrefix}-to`, type: 'date', value: st.to || '', onInput: (v) => onChange({ ...st, to: v }) }) });

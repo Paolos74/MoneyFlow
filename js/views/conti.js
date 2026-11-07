@@ -169,7 +169,7 @@ export function openInvestmentForm(ctx, etf = null) {
       }
       return true;
     },
-    content: (s) => { body = s.body; body.append(...build()); setTimeout(() => document.getElementById('e-name')?.focus(), 0); },
+    content: (s) => { body = s.body; body.append(...build()); },
   });
 }
 
@@ -209,7 +209,7 @@ export function openAccountForm(ctx, account = null) {
   function depositBlock() {
     const g = [el('div', { class: 'field field--inline', dataset: { field: 'deposit' } },
       el('label', { class: 'field__label', text: 'Deposito senza vincoli', attrs: { for: 'a-deposit' } }),
-      toggle({ id: 'a-deposit', checked: d.depositOn, label: 'Deposito senza vincoli', onChange: (v) => { d.depositOn = v; draw(); if (v) setTimeout(() => document.getElementById('a-rate')?.focus(), 0); } }),
+      toggle({ id: 'a-deposit', checked: d.depositOn, label: 'Deposito senza vincoli', onChange: (v) => { d.depositOn = v; draw(); } }),
       el('p', { class: 'field__error', hidden: true }))];
     if (d.depositOn) {
       const later = dep ? dep.rates.length - 1 : 0;
@@ -248,7 +248,7 @@ export function openAccountForm(ctx, account = null) {
       }
       return true;
     },
-    content: (s) => { body = s.body; body.append(...build()); setTimeout(() => document.getElementById('a-name')?.focus(), 0); },
+    content: (s) => { body = s.body; body.append(...build()); },
   });
 }
 
@@ -287,7 +287,6 @@ export function openGoalForm(ctx, goal = null) {
         el('p', { class: 'field__label', text: 'Colore' }),
         el('div', { class: 'form-group' }, el('div', { class: 'field', dataset: { field: 'color' } }, colorPicker(d.color, (c) => { d.color = c; }), el('p', { class: 'field__error', hidden: true }))),
         el('p', { class: 'section-footer', text: 'L\'obiettivo non sposta soldi tra i conti: aggiorni a mano quanto hai messo da parte.' }));
-      setTimeout(() => document.getElementById('g-name')?.focus(), 0);
     },
   });
 }

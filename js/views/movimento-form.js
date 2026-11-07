@@ -343,7 +343,7 @@ export function openMovementForm(ctx, opts = {}) {
       const ex = parseEuroInput(d.excludedText);
       const group = [el('div', { class: 'field field--inline' },
         el('label', { class: 'field__label', text: 'Escludi una quota', attrs: { for: 'f-exclude' } }),
-        toggle({ id: 'f-exclude', checked: d.excludeOn, label: 'Escludi una quota', onChange: (v) => { d.excludeOn = v; draw(); if (v) document.getElementById('f-excluded')?.focus(); } }))];
+        toggle({ id: 'f-exclude', checked: d.excludeOn, label: 'Escludi una quota', onChange: (v) => { d.excludeOn = v; draw(); } }))];
       if (d.excludeOn) {
         group.push(el('div', { class: 'field' }, segmented([
           { value: 'one', label: 'Una quota', id: 'ex-one' }, { value: 'people', label: 'Più persone', id: 'ex-people' },
@@ -414,7 +414,7 @@ export function openMovementForm(ctx, opts = {}) {
       el('p', { class: 'field__label', text: 'Persone e quote' }),
       el('p', { class: 'field__error', hidden: true, attrs: { 'aria-live': 'polite' } }),
       ...rows,
-      d.people.length < MAX_PEOPLE ? button('Aggiungi persona', () => { d.people.push({ name: '', amountText: '' }); draw(); setTimeout(() => document.getElementById('f-person-' + (d.people.length - 1))?.focus(), 0); }, { kind: 'plain', small: true, icon: 'plus', id: 'f-person-add' }) : null,
+      d.people.length < MAX_PEOPLE ? button('Aggiungi persona', () => { d.people.push({ name: '', amountText: '' }); draw(); }, { kind: 'plain', small: true, icon: 'plus', id: 'f-person-add' }) : null,
       el('p', { class: 'field__hint', id: 'f-people-hint', text: hintText() }),
       el('datalist', { id: 'f-people-list' }, C.knownPeople(state).map((n) => el('option', { value: n }))));
   }
@@ -478,6 +478,8 @@ export function openMovementForm(ctx, opts = {}) {
     draw();
   }
 
+  // v8 (decisione v8 §3): nessun campo riceve il focus all'apertura del foglio; resta solo dopo il tocco su una voce
+  // recente, che è la scelta dell'utente di scrivere l'importo (spesa in 3 tocchi, funzione I).
   function focusAmount() {
     setTimeout(() => document.getElementById('f-amount')?.focus(), 0);
   }
@@ -562,7 +564,6 @@ export function openMovementForm(ctx, opts = {}) {
     },
     content: (s) => { body = s.body; body.append(...build()); },
   });
-  if (!editing) focusAmount();
   return api;
 }
 
@@ -694,7 +695,6 @@ export function openTradeForm(ctx, { side = 'compra', cryptoAccountId = null, mo
     },
     content: (s) => { body = s.body; body.append(...build()); },
   });
-  if (!editing) setTimeout(() => document.getElementById('t-qty')?.focus(), 0);
   return api;
 }
 
@@ -902,7 +902,6 @@ export function openEtfTradeForm(ctx, { side = 'compra', etfId, movement = null 
     },
     content: (s) => { body = s.body; body.append(...build()); },
   });
-  if (!editing) setTimeout(() => document.getElementById('q-qty')?.focus(), 0);
   return api;
 }
 
@@ -969,7 +968,6 @@ export function openDividendForm(ctx, { etfId, movement = null } = {}) {
           s.close();
           if (attempt(() => store.deleteMovement(editing.id))) toast('Movimento eliminato', { undo: () => store.restoreMovement(editing.id) });
         } } })) : null);
-      if (!editing) setTimeout(() => document.getElementById('dv-amount')?.focus(), 0);
     },
   });
   return api;
@@ -1016,7 +1014,7 @@ export function openEtfPriceSheet(ctx, etf) {
       toast('Valore aggiornato', { undo: () => store.updateInvestment(etf.id, { prices: before }) });
       return true;
     },
-    content: (s) => { body = s.body; body.append(...build()); setTimeout(() => document.getElementById('p-price')?.focus(), 0); },
+    content: (s) => { body = s.body; body.append(...build()); },
   });
 }
 
@@ -1060,7 +1058,7 @@ export function openCryptoPriceSheet(ctx, account) {
       toast('Valore aggiornato', { undo: () => store.updateAccount(account.id, { prices: before }) });
       return true;
     },
-    content: (s) => { s.body.append(...build()); setTimeout(() => document.getElementById('cp-price')?.focus(), 0); },
+    content: (s) => { s.body.append(...build()); },
   });
 }
 
@@ -1216,6 +1214,5 @@ export function openScheduledForm(ctx, opts = {}) {
     },
     content: (s) => { body = s.body; body.append(...build()); },
   });
-  if (!editing) setTimeout(() => document.getElementById('s-amount')?.focus(), 0);
   return api;
 }

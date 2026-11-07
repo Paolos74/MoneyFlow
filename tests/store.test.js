@@ -232,6 +232,23 @@ test('fixture data-v6.json e investments-v6.json caricate identiche', () => {
   assert.equal(store.getState().categories.find((c) => c.id === 'default-uscita-spesa').budget, 30000);
 });
 
+// v8: fixture generata con lo store v7 pubblicato (78c18dd) partendo dalla v6: categoria creata dal movimento con un
+// budget, budget cambiato dalla scheda Budget, due movimenti nuovi. Gli ETF non cambiano (investments-v6.json). Dati inventati.
+test('fixture data-v7.json caricata identica', () => {
+  const data = readFileSync(new URL('./fixtures/data-v7.json', import.meta.url), 'utf8');
+  const inv = readFileSync(new URL('./fixtures/investments-v6.json', import.meta.url), 'utf8');
+  const storage = memoryStorage({ [DATA_KEY]: data, [INVEST_KEY]: inv });
+  const store = createStore({ storage, now: clock(), uuid: seqUuid() });
+  assert.equal(store.corrupted, null);
+  const { investments, ...rest } = store.getState();
+  assert.deepEqual(rest, JSON.parse(data));
+  assert.deepEqual(investments, JSON.parse(inv).investments);
+  assert.equal(storage.getItem(DATA_KEY), data, 'il caricamento non riscrive i dati');
+  assert.equal(storage.getItem(INVEST_KEY), inv, 'il caricamento non riscrive gli ETF');
+  assert.equal(store.getState().categories.find((c) => c.name === 'Palestra prova').budget, 4000);
+  assert.equal(store.getState().categories.find((c) => c.id === 'default-uscita-svago').budget, 15000);
+});
+
 test('applyRemote: vince updatedAt più recente e notifica come remote', () => {
   const { store, eur } = base();
   const events = [];

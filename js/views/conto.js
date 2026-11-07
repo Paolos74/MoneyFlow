@@ -106,7 +106,6 @@ function openRateSheet(ctx, a) {
         el('div', { class: 'form-group' },
           field({ label: 'Nuovo tasso annuo lordo (%)', field: 'rate', id: 'r-rate', input: input({ id: 'r-rate', value: d.rateText, inputmode: 'decimal', placeholder: '0,00', onInput: (v) => { d.rateText = v; } }) }),
           field({ label: 'Dal giorno', field: 'rdate', id: 'r-date', input: input({ id: 'r-date', type: 'date', value: d.date, cls: 'input--date', onInput: (v) => { d.date = v; } }) })));
-      setTimeout(() => document.getElementById('r-rate')?.focus(), 0);
     },
     onSave: () => {
       const rateBp = parsePercentInput(d.rateText, { max: 2000 });
@@ -135,7 +134,6 @@ function openAlignSheet(ctx, a) {
         el('div', { class: 'form-group' },
           field({ label: 'Saldo reale (€)', field: 'balance', id: 'al-balance', input: input({ id: 'al-balance', value: d.balanceText, inputmode: 'decimal', placeholder: '0,00', cls: 'input--amount', onInput: (v) => { d.balanceText = v; } }) }),
           field({ label: 'Alla data', field: 'date', id: 'al-date', hint: 'Il saldo a fine giornata di questa data (di solito oggi).', input: input({ id: 'al-date', type: 'date', value: d.date, cls: 'input--date', onInput: (v) => { d.date = v; } }) })));
-      setTimeout(() => document.getElementById('al-balance')?.focus(), 0);
     },
     onSave: () => {
       const balance = parseEuroInput(d.balanceText, { allowNegative: true });

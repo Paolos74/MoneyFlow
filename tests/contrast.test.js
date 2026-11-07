@@ -101,6 +101,17 @@ function pairs(T) {
       add(`Quanto ti resta tappa ${i + 1}: ${label}, anello sulla traccia`, c, track, 3);
     }
   });
+  // v8 (modifica 7): in Home la card "Quanto ti resta" ha il fondo neutro (surface): colore progressivo del numero e
+  // dell'anello (anche sulla traccia) a ogni 1 %; "Superato" rosso sulla riga del Piano evidenziata (ambra tenue).
+  const surfTrack = over(ringTrack.c, ringTrack.a, surface);
+  for (const [label, c] of progColors(T)) {
+    add(`Home, Quanto ti resta su surface: ${label}, testo`, c, surface, 4.5);
+    add(`Home, Quanto ti resta su surface: ${label}, anello sulla traccia`, c, surfTrack, 3);
+  }
+  add('Piano, riga evidenziata: rosso su ambra tenue', hex(T.danger), hex(T['amber-soft']), 4.5);
+  add('Piano, riga evidenziata: ambra su ambra tenue (Andrà oltre)', hex(T.amber), hex(T['amber-soft']), 4.5);
+  add('Piano, barra Andrà oltre sulla traccia (surface-2, anche nella riga evidenziata)', hex(T['risk-bar']), s2, 3);
+  add('Piano, barra Andrà oltre su surface', hex(T['risk-bar']), surface, 3);
   add('barra uscite del grafico su surface', hex(T['chart-expense']), surface, 3);
   add('barra entrate del grafico su surface', hex(T.income), surface, 3);
   add('scheda attiva: verde su tinta tenue', hex(T.accent), hex(T['accent-soft']), 4.5);

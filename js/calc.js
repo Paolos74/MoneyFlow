@@ -234,24 +234,47 @@ export function byMonth(state, months) {
 // Consiglio discreto di "Quanto ti resta" (v5, solo con almeno un budget): uscite contate del periodo in categorie
 // senza budget (anche eliminate o sconosciute), dalla più alta, esclusa "Altro" di uscita; `other` = uscite in
 // "Altro" di uscita (con o senza budget), così la stessa spesa non compare due volte; otherBudgeted = "Altro" ha un budget.
+// v8 (modifica 19), con `today`: ogni voce ha anche `planned` = uscite programmate ancora da pagare nel periodo in
+// quella categoria senza budget (stesso insieme di plannedBetween usato da "Quanto ti resta"; Altro esclusa come
+// sopra), `plannedCount` e `plannedLabel` (descrizione del primo programmato); compaiono anche le categorie con soli
+// programmati e l'ordine è per value + planned. Senza `today` il risultato è quello della v5.
+// Es. Affitto 600,00 programmato in Casa senza budget, nessuna spesa → { categoryId: Casa, value: 0, planned: 60000,
+// plannedCount: 1, plannedLabel: 'Affitto' }.
 export const OTHER_EXPENSE_ID = 'default-uscita-altro';
-export function budgetAdvice(state, period) {
+export function budgetAdvice(state, period, today = null) {
   const map = new Map();
   let other = 0;
+  const unbudgetedCat = (id) => { const c = byId(state.categories, id); return !(c && !c.deleted && c.budget); };
   for (const m of state.movements) {
     if (!inRange(m, period.from, period.to) || m.type !== 'uscita') continue;
     const v = countedExpense(m);
     if (!v) continue;
     if (m.categoryId === OTHER_EXPENSE_ID) { other += v; continue; }
-    const c = byId(state.categories, m.categoryId);
-    if (c && !c.deleted && c.budget) continue;
+    if (!unbudgetedCat(m.categoryId)) continue;
     map.set(m.categoryId, (map.get(m.categoryId) || 0) + v);
   }
   const oc = byId(state.categories, OTHER_EXPENSE_ID);
-  return {
-    unbudgeted: [...map.entries()].map(([categoryId, value]) => ({ categoryId, value })).sort((a, b) => b.value - a.value),
-    other, otherBudgeted: !!(oc && !oc.deleted && oc.budget),
-  };
+  const otherBudgeted = !!(oc && !oc.deleted && oc.budget);
+  if (!today) {
+    return {
+      unbudgeted: [...map.entries()].map(([categoryId, value]) => ({ categoryId, value })).sort((a, b) => b.value - a.value),
+      other, otherBudgeted,
+    };
+  }
+  const plan = new Map();
+  for (const p of plannedBetween(state, period.from, period.to, today)) {
+    const s = p.sched;
+    if (s.type !== 'uscita' || s.categoryId === OTHER_EXPENSE_ID || !unbudgetedCat(s.categoryId)) continue;
+    const cur = plan.get(s.categoryId) || { planned: 0, plannedCount: 0, plannedLabel: s.description || '' };
+    cur.planned += s.amount;
+    cur.plannedCount += 1;
+    plan.set(s.categoryId, cur);
+  }
+  const ids = new Set([...map.keys(), ...plan.keys()]);
+  const unbudgeted = [...ids].map((categoryId) => ({
+    categoryId, value: map.get(categoryId) || 0, ...(plan.get(categoryId) || { planned: 0, plannedCount: 0, plannedLabel: '' }),
+  })).sort((a, b) => (b.value + b.planned) - (a.value + a.planned));
+  return { unbudgeted, other, otherBudgeted };
 }
 
 // Budget per categoria: `range` è un mese 'YYYY-MM' oppure un periodo { from, to } (periodo dallo stipendio, v4).

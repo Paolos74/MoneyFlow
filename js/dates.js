@@ -119,6 +119,23 @@ export function monthLabel(ym) {
   return `${cap(MONTHS[m - 1])} ${y}`;
 }
 
+// v8: periodo leggibile per Movimenti: "Novembre 2026", "Settembre – Novembre 2026", "Anno 2026",
+// "Novembre 2025 – Gennaio 2026", altrimenti "03/11/2026 – 15/11/2026" (un giorno solo: la data).
+export function rangeLabel(from, to) {
+  if (!isValidISO(from) || !isValidISO(to)) return '';
+  if (from === to) return formatDateIt(from);
+  const a = monthOf(from);
+  const b = monthOf(to);
+  if (from === monthStart(a) && to === monthEnd(b) && a <= b) {
+    if (a === b) return monthLabel(a);
+    const [ya, yb] = [a.slice(0, 4), b.slice(0, 4)];
+    if (ya === yb && a.slice(5) === '01' && b.slice(5) === '12') return `Anno ${ya}`;
+    if (ya === yb) return `${cap(MONTHS[Number(a.slice(5)) - 1])} – ${monthLabel(b)}`;
+    return `${monthLabel(a)} – ${monthLabel(b)}`;
+  }
+  return `${formatDateIt(from)} – ${formatDateIt(to)}`;
+}
+
 export function monthShortLabel(ym) {
   const m = Number(ym.slice(5, 7));
   return cap(MONTHS_SHORT[m - 1]);

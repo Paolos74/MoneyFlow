@@ -395,7 +395,9 @@ export function sheet({ title, saveLabel = 'Salva', onSave, onClose, content, ca
   if (level) { backdrop.style.zIndex = String(50 + level * 2); node.style.zIndex = String(51 + level * 2); }
   attachDrag(node, backdrop, body, head, requestClose);
   sheetRoot().append(backdrop, node);
-  setTimeout(() => { if (!body.contains(document.activeElement)) (body.querySelector('[autofocus]') || saveBtn)?.focus?.(); }, 30);
+  // v8 (decisione v8 §3): all'apertura nessun elemento riceve il focus, così la tastiera si apre solo quando l'utente
+  // tocca un campo; il pulsante che ha aperto il foglio lascia il focus (resta prevFocus per riaverlo alla chiusura).
+  if (prevFocus && prevFocus !== document.body && !node.contains(prevFocus)) prevFocus.blur?.();
   return api;
 }
 
@@ -423,8 +425,9 @@ export function confirmDialog({ title, message, confirmLabel = 'OK', cancelLabel
   });
 }
 
-// Foglio d'azione: elenco di scelte più Annulla.
+// Foglio d'azione: elenco di scelte più Annulla. v8: come i fogli, nessun focus automatico all'apertura.
 export function actionSheet({ title, actions }) {
+  document.activeElement?.blur?.();
   const backdrop = el('div', { class: 'backdrop dialog-backdrop', on: { click: () => close() } });
   let closed = false;
   const close = () => { if (closed) return; closed = true; untrap(); backdrop.remove(); node.remove(); };
@@ -435,7 +438,6 @@ export function actionSheet({ title, actions }) {
     el('div', { class: 'actionsheet__group' }, el('button', { type: 'button', class: 'is-cancel', text: 'Annulla', on: { click: close } })));
   const untrap = trapEscape(close);
   sheetRoot().append(backdrop, node);
-  node.querySelector('button')?.focus();
 }
 
 // Toast a pillola, con "Annulla" facoltativo.

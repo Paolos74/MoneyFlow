@@ -108,7 +108,6 @@ export function openCategoryForm(ctx, cat, type, { onCreated, onCancel } = {}) {
           if (attempt(() => ctx.store.deleteCategory(cat.id))) toast('Categoria eliminata', { undo: () => ctx.store.restoreCategory(cat.id) });
         } } })));
       }
-      if (onCreated) setTimeout(() => document.getElementById('c-name')?.focus(), 0);
     },
   });
   return api;

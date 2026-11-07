@@ -50,7 +50,6 @@ function adjust(ctx, g, sign) {
     content: (s) => {
       s.body.append(el('div', { class: 'form-group' }, field({ label: 'Importo (€)', field: 'amount', id: 'ga-amount', hint: 'Non sposta soldi tra i conti.',
         input: input({ id: 'ga-amount', inputmode: 'decimal', placeholder: '0,00', cls: 'input--amount', onInput: (v) => { text = v; } }) })));
-      setTimeout(() => document.getElementById('ga-amount')?.focus(), 0);
     },
   });
 }

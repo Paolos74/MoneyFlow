@@ -24,7 +24,7 @@ export function openSetAsideSheet(ctx, { date }) {
       return el('div', { class: 'form-group setaside', attrs: { 'data-setaside': g.id }, vars: { '--c': g.color } },
         el('div', { class: 'field field--inline' },
           el('label', { class: 'field__label setaside__name', attrs: { for: `sa-on-${g.id}` } }, el('span', { class: 'chip__dot' }), el('span', { text: g.name })),
-          toggle({ id: `sa-on-${g.id}`, checked: r.on, label: `Metti da parte per ${g.name}`, onChange: (v) => { r.on = v; draw(); if (v) document.getElementById(`sa-${g.id}`)?.focus(); } })),
+          toggle({ id: `sa-on-${g.id}`, checked: r.on, label: `Metti da parte per ${g.name}`, onChange: (v) => { r.on = v; draw(); } })),
         r.on ? field({ label: 'Importo (€)', field: `alloc-${g.id}`, id: `sa-${g.id}`,
           hint: `Mancano ${formatEuro(Math.max(0, cur.target - cur.saved))}${g.monthly ? ` · quota mensile ${formatEuro(g.monthly)}` : ''}`,
           input: input({ id: `sa-${g.id}`, value: r.text, inputmode: 'decimal', placeholder: '0,00', onInput: (v) => { r.text = v; } }) })

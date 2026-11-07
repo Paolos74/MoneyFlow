@@ -194,6 +194,23 @@ test('v5 consiglio: Ristoranti senza budget e Altro (E1 + 45,00 in Altro), Altro
   assert.deepEqual(C.budgetAdvice(s, p), { unbudgeted: [{ categoryId: 'default-uscita-ristoranti', value: 8000 }], other: 4500, otherBudgeted: true });
 });
 
+test('v8 modifica 19: il consiglio "senza budget" conta anche i programmati da pagare (Casa 600,00 programmato)', () => {
+  const { store, cat, eur } = e1();
+  store.addScheduled({ type: 'uscita', amount: 60000, accountId: eur.id, categoryId: cat('uscita', 'Casa'), description: 'Affitto', start: '2026-11-25', freq: 'once' });
+  store.addScheduled({ type: 'uscita', amount: 2000, accountId: eur.id, categoryId: cat('uscita', 'Ristoranti'), start: '2026-11-28', freq: 'once' });
+  // In Altro e in una categoria con budget i programmati non entrano nel consiglio.
+  store.addScheduled({ type: 'uscita', amount: 1000, accountId: eur.id, categoryId: cat('uscita', 'Altro'), start: '2026-11-26', freq: 'once' });
+  store.addScheduled({ type: 'uscita', amount: 3000, accountId: eur.id, categoryId: cat('uscita', 'Spesa'), start: '2026-11-26', freq: 'once' });
+  const s = store.getState();
+  const p = budgetPeriod(s, '2026-11-21');
+  assert.deepEqual(C.budgetAdvice(s, p, '2026-11-21').unbudgeted, [
+    { categoryId: cat('uscita', 'Casa'), value: 0, planned: 60000, plannedCount: 1, plannedLabel: 'Affitto' },
+    { categoryId: 'default-uscita-ristoranti', value: 8000, planned: 2000, plannedCount: 1, plannedLabel: '' },
+  ]);
+  // Senza today resta il risultato della v5 (solo le uscite registrate).
+  assert.deepEqual(C.budgetAdvice(s, p).unbudgeted, [{ categoryId: 'default-uscita-ristoranti', value: 8000 }]);
+});
+
 // E3: novembre 2026. Stipendio 2.000,00 + dividendo 30,00; uscite contate 240,00 (E1); obiettivi 150,00 + 50,00;
 // deposito +500,00 −100,00; ETF Compra 501,00 + 281,00, Vendi arrivati 346,99; crypto Compra 100,00 esclusa.
 test('v5 E3: metti da parte 1.790,00 €, obiettivi 200,00 €, verso deposito e investimenti 835,01 €', () => {
