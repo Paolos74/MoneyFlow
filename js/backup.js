@@ -1,106 +1,38 @@
-// Backup completo in JSON: creazione, validazione, lettura (funzioni pure).
-// Formato invariato (schemaVersion 1). Sezioni facoltative aggiunte dopo la prima versione:
-// calendar: {rules, days}, notes, payments, settings (impostazioni dell'account, es. parametri delle tasse). I backup senza queste sezioni restano validi;
-// una versione vecchia dell'app le ignora.
-import { validateRecord } from './store.js';
+// Backup JSON di MoneyFlow: crea, valida, legge. Tombstone e riferimenti orfani inclusi.
+// Invariante: un backup creato dall'app passa sempre la propria validazione.
 
-const KIND_INFO = [
-  ['studios', 'studio', 'uno studio', 'studi'],
-  ['treatments', 'treatment', 'un trattamento', 'trattamenti'],
-  ['entries', 'entry', 'un inserimento', 'inserimenti'],
-];
+import { APP, SCHEMA_VERSION, KINDS, normalizeData, ValidationError } from './store.js';
+import { todayISO } from './dates.js';
 
-const OPTIONAL_INFO = [
-  ['rules', 'rule', 'una regola del calendario', 'regole del calendario'],
-  ['days', 'day', 'un giorno del calendario', 'giorni del calendario'],
-  ['notes', 'note', 'una nota', 'note'],
-  ['payments', 'payment', 'un incasso', 'incassi'],
-  ['settings', 'setting', 'un\'impostazione', 'impostazioni'],
-  ['memos', 'memo', 'una nota', 'note da ricordare'],
-];
-
-export function buildBackup(data, exportedAt = new Date().toISOString()) {
-  const strip = (arr) => (arr || []).filter((r) => !r.deleted).map((r) => structuredClone(r));
-  const out = {
-    app: 'DentalFlow',
-    schemaVersion: 1,
-    exportedAt,
-    studios: strip(data.studios),
-    treatments: strip(data.treatments),
-    entries: strip(data.entries),
-  };
-  if (data.calendar) out.calendar = { rules: strip(data.calendar.rules), days: strip(data.calendar.days) };
-  if (data.notes) out.notes = strip(data.notes);
-  if (data.payments) out.payments = strip(data.payments);
-  if (data.settings) out.settings = strip(data.settings);
-  if (data.memos) out.memos = strip(data.memos);
+export function createBackup(state, now = Date.now()) {
+  const out = { ...state, app: APP, schemaVersion: SCHEMA_VERSION, exportedAt: new Date(now).toISOString() };
+  for (const col of Object.values(KINDS)) out[col] = state[col].map((r) => ({ ...r }));
   return out;
 }
 
-const fail = (error) => ({ ok: false, error });
-const lowerFirst = (s) => s.charAt(0).toLowerCase() + s.slice(1);
-const isObj = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
-
-/** Valida un elenco di record; ritorna {list} o {error}. */
-function checkList(list, kind, label, plural) {
-  if (!Array.isArray(list)) return { error: `Backup non valido: elenco ${plural} mancante` };
-  const ids = new Set();
-  for (const r of list) {
-    if (r && typeof r === 'object' && r.deleted === true) return { error: `Backup non valido: ${label} risulta eliminato` };
-    const err = validateRecord(kind, r);
-    if (err) return { error: `Backup non valido: ${lowerFirst(err)} in ${label}` };
-    if (ids.has(r.id)) return { error: `Backup non valido: identificativo duplicato in ${label}` };
-    ids.add(r.id);
-  }
-  return {
-    list: list.map((r) => {
-      const c = structuredClone(r);
-      c.deleted = false;
-      if (typeof c.name === 'string') c.name = c.name.trim();
-      return c;
-    }),
-  };
-}
-
 export function validateBackup(obj) {
-  if (obj === null || typeof obj !== 'object' || Array.isArray(obj)) return fail('Backup non valido: formato non riconosciuto');
-  if (obj.app !== 'DentalFlow') return fail('Backup non valido: il file non è un backup di DentalFlow');
-  if (obj.schemaVersion !== 1) return fail('Backup non valido: versione del backup non supportata');
-  const data = {};
-  for (const [arr, kind, label, plural] of KIND_INFO) {
-    const res = checkList(obj[arr], kind, label, plural);
-    if (res.error) return fail(res.error);
-    data[arr] = res.list;
+  if (!obj || typeof obj !== 'object' || obj.app !== APP) throw new ValidationError('Il file non è un backup di MoneyFlow');
+  if (Number.isSafeInteger(obj.schemaVersion) && obj.schemaVersion > SCHEMA_VERSION) {
+    throw new ValidationError("Il backup viene da una versione più nuova di MoneyFlow: aggiorna l'app e riprova");
   }
-  if (obj.calendar !== undefined && !isObj(obj.calendar)) return fail('Backup non valido: calendario non riconosciuto');
-  const sources = {
-    rules: obj.calendar?.rules, days: obj.calendar?.days, notes: obj.notes, payments: obj.payments, settings: obj.settings, memos: obj.memos,
-  };
-  const present = {
-    rules: obj.calendar !== undefined, days: obj.calendar !== undefined, notes: obj.notes !== undefined, payments: obj.payments !== undefined,
-    settings: obj.settings !== undefined,
-    memos: obj.memos !== undefined,
-  };
-  for (const [arr, kind, label, plural] of OPTIONAL_INFO) {
-    if (!present[arr]) continue;
-    const res = checkList(sources[arr] ?? [], kind, label, plural);
-    if (res.error) return fail(res.error);
-    if (arr === 'rules' || arr === 'days') {
-      data.calendar ||= { rules: [], days: [] };
-      data.calendar[arr] = res.list;
-    } else {
-      data[arr] = res.list;
-    }
-  }
-  return { ok: true, data };
+  const data = normalizeData(obj);
+  if (!data) throw new ValidationError('Il backup è danneggiato: mancano o non sono validi alcuni elenchi');
+  delete data.exportedAt;
+  return data;
 }
 
-export function parseBackupText(text) {
+export function parseBackup(text) {
   let obj;
-  try {
-    obj = JSON.parse(text);
-  } catch {
-    return fail('File di backup non valido');
-  }
+  try { obj = JSON.parse(String(text).replace(/^\uFEFF/, '')); } catch { throw new ValidationError('Il file non è un JSON valido'); }
   return validateBackup(obj);
+}
+
+// Conteggi per il riepilogo prima di importare.
+export function backupSummary(data) {
+  const n = (list) => list.filter((r) => !r.deleted).length;
+  return { accounts: n(data.accounts), categories: n(data.categories), movements: n(data.movements), scheduled: n(data.scheduled), goals: n(data.goals), investments: n(data.investments || []) };
+}
+
+export function backupFileName(now = Date.now()) {
+  return `MoneyFlow_backup_${todayISO(new Date(now))}.json`;
 }

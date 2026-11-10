@@ -2,7 +2,7 @@
 
 App personale per gestire soldi, risparmi, stipendio e spese nel tempo. Funziona nel browser e si installa sul telefono (Android e iPhone). I dati restano sul dispositivo; la sincronizzazione online con Firebase è facoltativa.
 
-Versione: **moneyflow-v9**
+Versione: **moneyflow-v10**
 
 Aspetto (v9): card, riquadri e pulsanti di "vetro" in stile iOS, con una luce colorata leggera sul fondo; ogni pulsante "affonda" quando lo premi. Con **Riduci trasparenza** tutto diventa opaco, ma solo dove il browser comunica questa preferenza alla web app (oggi Chrome ed Edge su computer): su iPhone e su Android la preferenza non arriva all'app e il vetro resta trasparente. Per avere superfici piene sul telefono usa **Aumenta contrasto** (iPhone: Impostazioni → Accessibilità → Schermo e dimensioni testo), che rende card e pulsanti pieni, con bordi netti e senza ombre; con **Riduci movimento** il pulsante premuto si schiarisce invece di muoversi.
 

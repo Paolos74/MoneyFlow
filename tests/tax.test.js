@@ -1,161 +1,115 @@
-import test from 'node:test';
+// Test di js/tax.js: IRPEF 2026 su esempi calcolati a mano (i conti sono scritti nei commenti).
+import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import {
-  forfettario, acconti, scadenze, yearCompensi, yearBolli, yearExcluded, normalizeTaxParams, TAX_DEFAULTS, rateForYear, lastStartupYear,
-} from '../js/tax.js';
+import { irpefGross, irpefNet, workDays, employeeDeduction, extraDeduction, regionalSurcharges, estimateYear, tableFor } from '../js/tax.js';
 
-test('forfettario 2026: 30.000 € di compensi e 12 marche da bollo', () => {
-  const s = forfettario({ compensiCents: 3000000, bolli: 12, params: { ...TAX_DEFAULTS, rate: 1500 } });
-  assert.equal(s.bolloCents, 2400);
-  assert.equal(s.ricavi, 3002400); // 30.024,00
-  assert.equal(s.reddito, 2341872); // × 78 % = 23.418,72
-  assert.equal(s.contributi, 610526); // × 26,07 % = 6.105,26
-  assert.equal(s.imponibile, 1731346); // 17.313,46
-  assert.equal(s.imposta, 259702); // × 15 % = 2.597,02
-  assert.equal(s.totale, 870228);
-  assert.equal(s.netto, 2132172);
-  assert.equal(s.shareTenths, 290); // 29,0 %
-  assert.equal(s.onRedditoTenths, 372); // 37,2 % del reddito
-  assert.equal(s.soglia, null);
+const T = tableFor(2026);
+
+test('A: r 30.000,00 €, 365 giorni', () => {
+  // lorda 28.000 × 23% = 6.440 + 2.000 × 33% = 660 → 7.100,00
+  // r4 = (50.000 − 30.000)/22.000 = 0,90909 → 0,9090; 1.910 × 0,9090 = 1.736,19 + 65 = 1.801,19
+  // ulteriore 1.000,00; netta 7.100 − 1.801,19 − 1.000 = 4.298,81
+  assert.deepEqual(irpefNet(3000000, 365, T), { gross: 710000, employee: 180119, extra: 100000, net: 429881 });
 });
 
-test('predefiniti: imposta al 5 %; peso sul reddito 29,8 % e sui ricavi 23,2 %', () => {
-  assert.equal(TAX_DEFAULTS.rate, 500);
-  const s = forfettario({ compensiCents: 1000000 });
-  assert.equal(s.reddito, 780000);
-  assert.equal(s.contributi, 203346); // 26,07 %
-  assert.equal(s.imposta, 28833); // 5 % di 576.654
-  assert.equal(s.onRedditoTenths, 298);
-  assert.equal(s.shareTenths, 232);
+test('B: r 35.847,00 €, assunto 1/3 → 306 giorni', () => {
+  // giorni: 31+30+31+30+31+31+30+31+30+31 = 306
+  assert.equal(workDays(2026, '2026-03-01'), 306);
+  // lorda 6.440 + 7.847 × 33% = 2.589,51 → 9.029,51
+  // r4 = 14.153/22.000 = 0,6433; 1.910 × 0,6433 = 1.228,703 (niente +65: r > 35.000) × 306/365 = 1.030,0907 → 1.030,09
+  // ulteriore r4 = 4.153/8.000 = 0,5191 → 519,10 × 306/365 = 435,1907 → 435,19
+  // netta 9.029,51 − 1.030,09 − 435,19 = 7.564,23
+  assert.deepEqual(irpefNet(3584700, 306, T), { gross: 902951, employee: 103009, extra: 43519, net: 756423 });
 });
 
-test('aliquote alternative: 24 % INPS e 5 % start-up', () => {
-  const s = forfettario({ compensiCents: 1000000, params: { ...TAX_DEFAULTS, inps: 2400, rate: 500 } });
-  assert.equal(s.reddito, 780000);
-  assert.equal(s.contributi, 187200);
-  assert.equal(s.imponibile, 592800);
-  assert.equal(s.imposta, 29640);
+test('C: r 8.000,00 €, 100 giorni → minimo 690 €', () => {
+  // 1.955 × 100/365 = 535,62 → minimo 690,00; lorda 8.000 × 23% = 1.840,00; netta 1.150,00
+  assert.equal(employeeDeduction(800000, 100, T), 69000);
+  assert.deepEqual(irpefNet(800000, 100, T), { gross: 184000, employee: 69000, extra: 0, net: 115000 });
 });
 
-test('soglie del forfettario: 85.000 € e 100.000 €', () => {
-  assert.equal(forfettario({ compensiCents: 8500000 }).soglia, null);
-  assert.equal(forfettario({ compensiCents: 8500001 }).soglia, 'superata');
-  assert.equal(forfettario({ compensiCents: 8499900, bolli: 1 }).soglia, 'superata', 'le marche da bollo contano per la soglia');
-  assert.equal(forfettario({ compensiCents: 10000001 }).soglia, 'uscita');
+test('D: r 60.000,00 €, nessuna detrazione', () => {
+  // 6.440 + 22.000 × 33% = 7.260 + 10.000 × 43% = 4.300 → 18.000,00
+  assert.deepEqual(irpefNet(6000000, 365, T), { gross: 1800000, employee: 0, extra: 0, net: 1800000 });
 });
 
-test('anno senza compensi: tutto a zero, nessuna divisione per zero', () => {
-  const s = forfettario({ compensiCents: 0 });
-  assert.equal(s.totale, 0);
-  assert.equal(s.shareTenths, 0);
-  assert.deepEqual(acconti(s), { imposta: [0, 0], contributi: [0, 0] });
+test('E: r 20.000,00 €, 365 giorni', () => {
+  // lorda 4.600,00; r4 = 8.000/13.000 = 0,6153; 1.910 + 1.190 × 0,6153 = 2.642,207 → 2.642,21
+  // ulteriore 0 (r non supera 20.000); netta 1.957,79
+  assert.deepEqual(irpefNet(2000000, 365, T), { gross: 460000, employee: 264221, extra: 0, net: 195779 });
+  assert.equal(extraDeduction(2000001, 365, T), 100000);
 });
 
-test('acconti dell\'imposta: soglie 51,65 € e 257,52 €; contributi all\'80 %', () => {
-  assert.deepEqual(acconti({ imposta: 5164, contributi: 0 }).imposta, [0, 0]);
-  assert.deepEqual(acconti({ imposta: 5165, contributi: 0 }).imposta, [0, 5165]);
-  assert.deepEqual(acconti({ imposta: 25752, contributi: 0 }).imposta, [0, 25752]);
-  assert.deepEqual(acconti({ imposta: 100000, contributi: 0 }).imposta, [40000, 60000]);
-  assert.deepEqual(acconti({ imposta: 0, contributi: 100001 }).contributi, [40000, 40000]);
+test('F: r 5.000,00 €: detrazione maggiore della lorda → netta 0 e niente addizionali', () => {
+  const r = irpefNet(500000, 365, T);
+  assert.equal(r.gross, 115000);
+  assert.equal(r.net, 0);
+  assert.deepEqual(regionalSurcharges(500000, r.net, 173, 80), { regional: 0, municipal: 0, total: 0, monthly: 0 });
 });
 
-test('scadenze: primo anno senza acconti versati, anno dopo con saldo e credito', () => {
-  const y1 = forfettario({ compensiCents: 3000000 });
-  const first = scadenze(2026, y1, null);
-  assert.equal(first.giugno.date, '2027-06-30');
-  assert.equal(first.novembre.date, '2027-11-30');
-  assert.equal(first.giugno.saldoImposta, y1.imposta);
-  assert.equal(first.giugno.totale, y1.imposta + y1.contributi + acconti(y1).imposta[0] + acconti(y1).contributi[0]);
-  // anno successivo con compensi molto più bassi: gli acconti versati superano il dovuto → credito
-  const y2 = forfettario({ compensiCents: 200000 });
-  const second = scadenze(2027, y2, y1);
-  assert.ok(second.giugno.saldoImposta < 0 && second.giugno.saldoContributi < 0);
-  assert.equal(second.giugno.totale, 0);
-  assert.ok(second.giugno.credito > 0);
+test('giorni di lavoro nell\'anno', () => {
+  assert.equal(workDays(2026, null), 365);
+  assert.equal(workDays(2028, null), 365); // bisestile: massimo 365
+  assert.equal(workDays(2026, '2027-01-10'), 0);
+  assert.equal(workDays(2026, '2020-05-01'), 365);
+  assert.equal(workDays(2026, '2026-12-31'), 1);
+  assert.equal(irpefGross(0, T), 0);
 });
 
-test('compensi e marche da bollo dell\'anno', () => {
-  const entries = [
-    { date: '2026-01-02', amountCents: 1000 }, { date: '2026-12-31', amountCents: 500 },
-    { date: '2025-12-31', amountCents: 9999 }, { date: '2026-05-05', amountCents: 7, deleted: true },
-  ];
-  assert.equal(yearCompensi(entries, 2026), 1500);
-  const pays = [
-    { month: '2026-01', paid: true, bollo: true }, { month: '2026-02', paid: true },
-    { month: '2026-03', paid: false, bollo: true }, { month: '2025-12', paid: true, bollo: true },
-  ];
-  assert.equal(yearBolli(pays, 2026), 1);
+const G = {
+  year: 2026, hireDate: '2026-03-01', regionalBp: 173, municipalBp: 80,
+  months: [{ ym: '2026-03', taxable: 350000, irpef: 80000 }, { ym: '2026-04', taxable: 370000, irpef: 86000 }],
+};
+
+test('stima G: proiezione con la media dei mesi registrati, rimborso e addizionali', () => {
+  const e = estimateYear(G);
+  // lavorati 10 (marzo–dicembre), registrati 2, mancanti 8
+  assert.equal(e.worked, 10);
+  assert.equal(e.registered, 2);
+  assert.equal(e.missing, 8);
+  assert.equal(e.days, 306);
+  // imponibile 7.200 + 8 × 3.600 = 36.000,00; trattenuta 1.660 + 8 × 830 = 8.300,00
+  assert.equal(e.perMonthTaxable, 360000);
+  assert.equal(e.perMonthIrpef, 83000);
+  assert.equal(e.annualTaxable, 3600000);
+  assert.equal(e.withheld, 830000);
+  // lorda 6.440 + 8.000 × 33% = 9.080,00
+  assert.equal(e.gross, 908000);
+  // r4 = 14.000/22.000 = 0,6363; 1.910 × 0,6363 = 1.215,333 × 306/365 = 1.018,8819 → 1.018,88
+  assert.equal(e.employee, 101888);
+  // ulteriore r4 = 0,5000 → 500 × 306/365 = 419,178 → 419,18
+  assert.equal(e.extra, 41918);
+  // netta 9.080 − 1.018,88 − 419,18 = 7.641,94; conguaglio 7.641,94 − 8.300,00 = −658,06 (rimborso)
+  assert.equal(e.net, 764194);
+  assert.equal(e.balance, -65806);
+  // addizionali: 36.000 × 1,73% = 622,80; × 0,80% = 288,00; totale 910,80; rata 910,80/11 = 82,80
+  assert.deepEqual(e.surcharges, { regional: 62280, municipal: 28800, total: 91080, monthly: 8280 });
+  assert.equal(e.outlier, false);
 });
 
-test('parametri: valori fuori limite tornano ai predefiniti', () => {
-  assert.deepEqual(normalizeTaxParams({ coeff: 7800, inps: 99999, rate: 500, bollo: -1, openDate: '2026-13-01' }), { coeff: 7800, inps: 2607, rate: 500, bollo: 200, openDate: null, excluded: [], fixedPct: null, declared: {} });
-  assert.deepEqual(normalizeTaxParams(null), { ...TAX_DEFAULTS, excluded: [] });
+test('stima H: proiezione scritta a mano (3.000,00 imponibile e 700,00 IRPEF per mese)', () => {
+  const e = estimateYear({ ...G, projTaxable: 300000, projIrpef: 70000 });
+  // imponibile 7.200 + 8 × 3.000 = 31.200,00; trattenuta 1.660 + 8 × 700 = 7.260,00
+  assert.equal(e.annualTaxable, 3120000);
+  assert.equal(e.withheld, 726000);
+  // lorda 6.440 + 3.200 × 33% = 7.496,00
+  assert.equal(e.gross, 749600);
+  // r4 = 18.800/22.000 = 0,8545; (1.910 × 0,8545 = 1.632,095 + 65) × 306/365 = 1.422,770 → 1.422,77
+  assert.equal(e.employee, 142277);
+  // ulteriore 1.000 × 306/365 = 838,356 → 838,36
+  assert.equal(e.extra, 83836);
+  // netta 5.234,87; conguaglio 5.234,87 − 7.260,00 = −2.025,13
+  assert.equal(e.net, 523487);
+  assert.equal(e.balance, -202513);
+  assert.equal(e.manualTaxable, true);
 });
 
-test('apertura della partita IVA: 5 % nell\'anno di apertura e nei 4 successivi, poi 15 %', () => {
-  const p = { ...TAX_DEFAULTS, openDate: '2024-09-15', rate: 1500 };
-  assert.equal(lastStartupYear(p), 2028);
-  assert.equal(rateForYear(p, 2024), 500);
-  assert.equal(rateForYear(p, 2028), 500);
-  assert.equal(rateForYear(p, 2029), 1500);
-  // senza data vale l'aliquota scelta
-  assert.equal(rateForYear({ ...TAX_DEFAULTS, rate: 1500 }, 2029), 1500);
-  assert.equal(lastStartupYear(TAX_DEFAULTS), null);
-  // la stima dell'anno usa l'aliquota di quell'anno
-  assert.equal(forfettario({ compensiCents: 1000000, params: p, year: 2028 }).rate, 500);
-  const after = forfettario({ compensiCents: 1000000, params: p, year: 2029 });
-  assert.equal(after.rate, 1500);
-  assert.equal(after.imposta, 86498); // 15 % di 576.654
-});
-
-test('trattamenti esclusi dal calcolo: fuori dai compensi, elencati a parte, parametro normalizzato', () => {
-  const entries = [
-    { date: '2026-03-01', treatmentId: 'a', amountCents: 10000 },
-    { date: '2026-03-02', treatmentId: 'b', amountCents: 2500 },
-    { date: '2026-04-02', treatmentId: 'b', amountCents: 500 },
-    { date: '2025-04-02', treatmentId: 'b', amountCents: 999 },
-  ];
-  assert.equal(yearCompensi(entries, 2026), 13000);
-  assert.equal(yearCompensi(entries, 2026, ['b']), 10000);
-  assert.deepEqual([...yearExcluded(entries, 2026, ['b'])], [['b', 3000]]);
-  assert.deepEqual(yearExcluded(entries, 2026, []).size, 0);
-  assert.deepEqual(normalizeTaxParams({ excluded: ['b', 'a', 'b', '', 3] }).excluded, ['a', 'b']);
-  assert.deepEqual(normalizeTaxParams({ excluded: 'x' }).excluded, []);
-});
-
-test('esclusioni mensili dagli Incassi: sommate per anno, solo valori validi', async () => {
-  const { yearPaymentExclusions } = await import('../js/tax.js');
-  const pays = [
-    { month: '2026-10', excludedCents: 20000 }, { month: '2026-11', excludedCents: 500 },
-    { month: '2025-12', excludedCents: 9999 }, { month: '2026-09', excludedCents: 100, deleted: true },
-    { month: '2026-08' }, { month: '2026-07', excludedCents: -5 },
-  ];
-  assert.equal(yearPaymentExclusions(pays, 2026), 20500);
-  assert.equal(yearPaymentExclusions(pays, 2025), 9999);
-});
-
-test('percentuale fissa da mettere da parte: sostituisce il calcolo nei numeri principali', async () => {
-  const { fixedShare } = await import('../js/tax.js');
-  const s = forfettario({ compensiCents: 3000000 });
-  assert.equal(fixedShare(s, TAX_DEFAULTS), null);
-  const f = fixedShare(s, { ...TAX_DEFAULTS, fixedPct: 3200 });
-  assert.deepEqual(f, { pct: 3200, totale: 960000, netto: 2040000, shareTenths: 320 });
-  assert.equal(normalizeTaxParams({ fixedPct: 0 }).fixedPct, null);
-  assert.equal(normalizeTaxParams({ fixedPct: 9500 }).fixedPct, null);
-  assert.equal(normalizeTaxParams({ fixedPct: 3250 }).fixedPct, 3250);
-});
-
-test('tasse vere dell\'anno prima: sostituiscono la stima negli acconti versati', async () => {
-  const { declaredFor } = await import('../js/tax.js');
-  const p = normalizeTaxParams({ declared: { 2025: { imposta: 50000, contributi: 600000 }, 1800: { imposta: 1, contributi: 1 }, 2024: { imposta: -1, contributi: 0 } } });
-  assert.deepEqual(Object.keys(p.declared), ['2025']);
-  assert.deepEqual(declaredFor(p, 2025), { imposta: 50000, contributi: 600000 });
-  assert.equal(declaredFor(p, 2026), null);
-  const s = forfettario({ compensiCents: 3000000, params: p, year: 2026 });
-  const sc = scadenze(2026, s, declaredFor(p, 2025));
-  // acconti 2026 dalle tasse 2025: imposta 500 € → 40 % + 60 %, contributi 80 % di 6.000 €
-  assert.equal(sc.versati.imposta, 50000);
-  assert.equal(sc.versati.contributi, 480000);
-  assert.equal(sc.giugno.saldoImposta, s.imposta - 50000);
-  assert.equal(sc.giugno.saldoContributi, s.contributi - 480000);
+test('avviso per un mese molto più alto, anni senza tabella, nessun mese', () => {
+  // mediana 3.700; 9.900 > 1,5 × 3.700 = 5.550
+  const months = [{ ym: '2026-03', taxable: 350000, irpef: 0 }, { ym: '2026-04', taxable: 370000, irpef: 0 }, { ym: '2026-05', taxable: 990000, irpef: 0 }];
+  assert.equal(estimateYear({ year: 2026, months }).outlier, true);
+  assert.deepEqual(estimateYear({ year: 2025, months }), { available: false, year: 2025 });
+  assert.deepEqual(estimateYear({ year: 2026, months: [] }), { available: true, empty: true, year: 2026 });
+  // addizionali senza percentuali
+  assert.deepEqual(estimateYear({ ...G, regionalBp: null, municipalBp: null }).surcharges, { regional: null, municipal: null, total: null, monthly: null });
 });
