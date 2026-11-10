@@ -1,4 +1,5 @@
-// Home (v8, alternativa B "Cruscotto a riquadri", modifiche 1–9 e 12–19): titolo = periodo, card "Quanto ti resta"
+// Home (v8, alternativa B "Cruscotto a riquadri", modifiche 1–9 e 12–19; v9: stessa intestazione con icona anche per
+// Quanto ti resta, una tinta per significato, segno meno tipografico nelle uscite): titolo = periodo, card "Quanto ti resta"
 // tutta toccabile, riquadri (Da pagare, Messo da parte, Budget, Chi mi deve, Obiettivi), Dove spendi, Ultimi
 // movimenti, promemoria backup in fondo. Ogni elemento è un'anteprima che porta alla schermata dove si approfondisce;
 // gli elementi senza contenuto non compaiono. Calcoli invariati (remaining, savedInPeriod, budgetStatus della v6/v7).
@@ -95,7 +96,7 @@ function heroCard(p, r) {
     ? [piece('Spesi', r.expense, 'month-expense'), piece('Da pagare', r.planned, 'home-planned'), piece('Budget', r.budget, 'home-budget-total', true)]
     : [piece('Entrate', r.income, 'month-income'), piece('Uscite', r.expense, 'month-expense'), piece('Da pagare', r.planned, 'home-planned', true)];
   return el('a', { class: 'card hhero', href: '#budget', id: 'home-remaining' },
-    head('Quanto ti resta'),
+    head('Quanto ti resta', 'gauge', 'emerald'),
     el('div', {
       class: 'remaining__main' + (stop ? ' prog' : ''),
       vars: stop ? { '--prog-a': `var(--prog-${stop.from})`, '--prog-b': `var(--prog-${stop.to})`, '--prog-t': `${stop.mix}%` } : null,
@@ -157,7 +158,7 @@ function tilesGrid(ctx, state, today, p, r, budgets) {
   const sv = savedInPeriod(state, p, today);
   if (sv.income > 0 || sv.expense > 0 || sv.planned > 0) {
     tiles.push(tile({
-      id: 'home-saved', href: '#statistiche?blocco=da-parte', title: 'Messo da parte', ic: 'piggy', tint: 'pink',
+      id: 'home-saved', href: '#statistiche?blocco=da-parte', title: 'Messo da parte', ic: 'piggy', tint: 'butter',
       value: formatEuroSigned(sv.net),
       lines: [sv.income > 0 && sv.net >= 0 ? `${formatPercent(sv.rate)} delle entrate` : null, sv.planned > 0 ? `${formatEuro(sv.planned)} già tolti` : null],
     }));
@@ -187,7 +188,7 @@ function tilesGrid(ctx, state, today, p, r, budgets) {
   if (credits.total > 0) {
     const debts = C.debtsByPerson(state);
     tiles.push(tile({
-      id: 'home-credits', href: '#da-ricevere', title: debts.length ? 'Chi mi deve' : 'Da ricevere', ic: 'hand', tint: 'emerald', value: formatEuro(credits.total),
+      id: 'home-credits', href: '#da-ricevere', title: debts.length ? 'Chi mi deve' : 'Da ricevere', ic: 'hand', tint: 'teal', value: formatEuro(credits.total),
       lines: [debts.length ? debts.slice(0, 3).map((d) => d.person).join(', ') + (debts.length > 3 ? '…' : '') : `${credits.items.length} ${credits.items.length === 1 ? 'quota anticipata' : 'quote anticipate'}`],
     }));
   }
@@ -236,7 +237,7 @@ function whereCard(state, today, p, r, budgets) {
   const legend = top.map((x) => legendRow(C.categoryColor(state, x.categoryId), C.categoryLabel(state, x.categoryId), x.used, { 'data-where': x.categoryId }));
   if (rest.spent + rest.planned > 0) legend.push(legendRow('var(--muted)', 'Altre', rest.spent + rest.planned, { 'data-where': 'altre' }));
   return el('a', { class: 'card where', href: '#budget?sezione=piano', id: 'home-where' },
-    head('Dove spendi', 'chart', 'amber'),
+    head('Dove spendi', 'chart', 'indigo'),
     el('div', { class: 'stack', attrs: { role: 'img', 'aria-label': `Usato ${formatEuro(totalUsed)}${r.mode === 'budget' ? ` su un budget di ${formatEuro(r.budget)}` : ''}` } }, ...segs),
     el('ul', { class: 'where__legend' }, ...legend),
     totalPlanned > 0 ? el('p', { class: 'where__note', id: 'home-where-planned' }, el('span', { class: 'where__key' }), `Tratteggiato: ${formatEuro(totalPlanned)} da pagare`) : null);
@@ -249,11 +250,11 @@ function recentCard(state, today) {
     .sort((a, b) => b.date.localeCompare(a.date) || b.createdAt - a.createdAt).slice(0, 3);
   if (!movs.length) return null;
   return el('a', { class: 'card recent-card', href: '#movimenti', id: 'home-recent' },
-    head('Ultimi movimenti', 'list', 'teal'),
+    head('Ultimi movimenti', 'list', 'graphite'),
     el('ul', { class: 'hl-list' }, ...movs.map((m) => el('li', { class: 'hl', attrs: { 'data-movement': m.id } },
       iconBox(C.categoryIcon(state, m.categoryId), C.movementColor(state, m)),
       el('span', { class: 'hl__main' },
         el('span', { class: 'hl__title', text: movementTitle(state, m) }),
         el('span', { class: 'hl__sub', text: `${shortDate(m.date, today)} · ${C.categoryLabel(state, m.categoryId)}` })),
-      el('span', { class: 'hl__value' + (m.type === 'entrata' ? ' is-income' : ''), text: m.type === 'uscita' ? formatEuro(-m.amount) : formatEuroSigned(m.amount) })))));
+      el('span', { class: 'hl__value' + (m.type === 'entrata' ? ' is-income' : ''), text: m.type === 'uscita' ? '−' + formatEuro(m.amount) : formatEuroSigned(m.amount) })))));
 }

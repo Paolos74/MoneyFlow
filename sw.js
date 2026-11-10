@@ -1,112 +1,119 @@
-// Service worker di DentalFlow. Aumenta VERSION a ogni rilascio: comparirà il banner "Aggiorna".
-const VERSION = 'dentalflow-v21';
+// Service worker di MoneyFlow: cache dei file dell'app, offline, aggiornamento solo su richiesta.
+// AUMENTARE VERSION A OGNI RILASCIO e tenere ASSETS uguale ai file pubblicati.
 
+const VERSION = 'moneyflow-v9';
 const ASSETS = [
   './',
   'index.html',
   'offline.html',
   'manifest.webmanifest',
   'css/app.css',
+  'icons/moneyflow-v4.svg',
+  'icons/moneyflow-v4-favicon.svg',
+  'icons/moneyflow-v4-192.png',
+  'icons/moneyflow-v4-512.png',
+  'icons/moneyflow-v4-maskable-512.png',
+  'icons/moneyflow-v4-apple-touch-180.png',
+  'icons/moneyflow-v4-favicon-32.png',
   'js/app.js',
+  'js/backup.js',
+  'js/calc.js',
+  'js/charts.js',
+  'js/csv-import.js',
+  'js/csv.js',
+  'js/dates.js',
+  'js/errors.js',
   'js/escape.js',
   'js/firebase-config.js',
-  'js/ui.js',
-  'js/money.js',
-  'js/dates.js',
-  'js/store.js',
-  'js/aggregate.js',
-  'js/csv.js',
-  'js/backup.js',
-  'js/charts.js',
-  'js/sync.js',
-  'js/calendar.js',
-  'js/ics.js',
-  'js/colors.js',
-  'js/prefs.js',
   'js/icons.js',
-  'js/theme-boot.js',
-  'js/views/oggi.js',
-  'js/views/inserisci.js',
-  'js/views/registro.js',
-  'js/views/riepilogo.js',
-  'js/views/grafici.js',
-  'js/views/gestione.js',
-  'js/views/calendario.js',
-  'js/views/tasse.js',
+  'js/interest.js',
+  'js/invest.js',
+  'js/money.js',
+  'js/payslip.js',
+  'js/pdf-text.js',
+  'js/pension.js',
+  'js/period.js',
+  'js/prefs.js',
+  'js/recurrence.js',
+  'js/routes.js',
+  'js/store.js',
+  'js/sync.js',
+  'js/tax-settings.js',
+  'js/tax-tables.js',
   'js/tax.js',
-  'icons/icon-192.png',
-  'icons/icon-512.png',
-  'icons/icon-maskable-512.png',
-  'icons/apple-touch-icon.png',
-  'icons/favicon-32.png',
+  'js/theme-boot.js',
+  'js/ui.js',
+  'js/views/budget.js',
+  'js/views/calendario.js',
+  'js/views/conti.js',
+  'js/views/conto.js',
+  'js/views/da-confermare.js',
+  'js/views/da-ricevere.js',
+  'js/views/fondo-pensione.js',
+  'js/views/importa.js',
+  'js/views/investimento.js',
+  'js/views/home.js',
+  'js/views/impostazioni.js',
+  'js/views/metti-da-parte.js',
+  'js/views/movimenti.js',
+  'js/views/movimento-form.js',
+  'js/views/obiettivo.js',
+  'js/views/parts.js',
+  'js/views/programmati.js',
+  'js/views/statistiche.js',
+  'js/views/stipendio.js',
 ];
-
 const scopeUrl = (p) => new URL(p, self.registration.scope).href;
-const INDEX_URL = () => scopeUrl('index.html');
-const OFFLINE_URL = () => scopeUrl('offline.html');
 
-self.addEventListener('install', (event) => {
-  // Nessun skipWaiting qui: il nuovo SW attende che l'utente prema "Aggiorna".
-  event.waitUntil(
-    caches.open(VERSION).then((cache) => cache.addAll(ASSETS.map((p) => new Request(scopeUrl(p), { cache: 'reload' })))),
-  );
+self.addEventListener('install', (e) => { // niente skipWaiting: aspetta "Aggiorna"
+  e.waitUntil(caches.open(VERSION).then((c) => c.addAll(ASSETS.map((p) => new Request(scopeUrl(p), { cache: 'reload' })))));
 });
 
-self.addEventListener('activate', (event) => {
-  event.waitUntil(
-    caches.keys()
-      .then((keys) => Promise.all(keys.filter((k) => k.startsWith('dentalflow-') && k !== VERSION).map((k) => caches.delete(k))))
-      .then(() => self.clients.claim()),
-  );
+self.addEventListener('activate', (e) => {
+  e.waitUntil(caches.keys()
+    .then((ks) => Promise.all(ks.filter((k) => k.startsWith('moneyflow-') && k !== VERSION).map((k) => caches.delete(k))))
+    .then(() => self.clients.claim()));
 });
 
-self.addEventListener('message', (event) => {
-  const type = event.data && event.data.type;
-  if (type === 'SKIP_WAITING') self.skipWaiting();
-  else if (type === 'GET_VERSION') event.ports[0]?.postMessage({ version: VERSION });
+self.addEventListener('message', (e) => {
+  if (e.data?.type === 'SKIP_WAITING') self.skipWaiting();
+  else if (e.data?.type === 'GET_VERSION') e.ports[0]?.postMessage({ version: VERSION });
 });
 
-async function handleNavigation(request) {
-  const cache = await caches.open(VERSION);
-  const cached = await cache.match(INDEX_URL(), { ignoreSearch: true });
-  if (cached) return cached;
-  try {
-    const res = await fetch(request);
-    const url = new URL(request.url);
-    const scopePath = new URL(self.registration.scope).pathname;
-    if (res.ok && (url.pathname === scopePath || url.pathname.endsWith('/index.html'))) {
-      await cache.put(INDEX_URL(), res.clone());
-    }
-    return res;
-  } catch {
-    const offline = await cache.match(OFFLINE_URL());
-    return offline || Response.error();
+// Solo GET della stessa origine: Firebase e le altre API esterne vanno sempre in rete.
+self.addEventListener('fetch', (e) => {
+  const req = e.request;
+  if (req.method !== 'GET') return;
+  const url = new URL(req.url);
+  if (url.origin !== self.location.origin) return;
+
+  if (req.mode === 'navigate') {
+    e.respondWith((async () => {
+      const cached = await caches.match(scopeUrl('index.html'), { ignoreSearch: true });
+      // Le pagine dell'app (radice o index.html, con qualsiasi ?parametro) vengono dalla cache.
+      const isApp = url.pathname.endsWith('/') || url.pathname.endsWith('/index.html');
+      if (cached && isApp) return cached;
+      try {
+        return await fetch(req);
+      } catch {
+        return (await caches.match(scopeUrl('offline.html'))) || Response.error();
+      }
+    })());
+    return;
   }
-}
 
-async function handleAsset(request) {
-  const cache = await caches.open(VERSION);
-  const cached = await cache.match(request);
-  if (cached) return cached;
-  try {
-    const res = await fetch(request);
-    if (res.ok && res.type === 'basic') await cache.put(request, res.clone());
-    return res;
-  } catch {
-    const accept = request.headers.get('accept') || '';
-    if (accept.includes('text/html')) {
-      const offline = await cache.match(OFFLINE_URL());
-      if (offline) return offline;
+  e.respondWith((async () => {
+    const cached = await caches.match(req, { ignoreSearch: true });
+    if (cached) return cached;
+    try {
+      const res = await fetch(req);
+      if (res.ok && res.type === 'basic') {
+        const copy = res.clone();
+        caches.open(VERSION).then((c) => c.put(req, copy)).catch(() => {});
+      }
+      return res;
+    } catch {
+      return Response.error();
     }
-    return Response.error();
-  }
-}
-
-self.addEventListener('fetch', (event) => {
-  const { request } = event;
-  if (request.method !== 'GET') return;
-  const url = new URL(request.url);
-  if (url.origin !== self.location.origin) return; // Firebase e ogni richiesta esterna vanno in rete
-  if (request.mode === 'navigate') event.respondWith(handleNavigation(request));
-  else event.respondWith(handleAsset(request));
+  })());
 });

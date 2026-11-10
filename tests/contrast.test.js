@@ -121,6 +121,110 @@ function pairs(T) {
   return out;
 }
 
+// ---- v9, materiale "Vetro" ----
+// Filtro saturate(s) della specifica Filter Effects (matrice in sRGB, canali limitati a 0–255).
+export function saturate(c, s) {
+  const [r, g, b] = c;
+  return [
+    (0.213 + 0.787 * s) * r + (0.715 - 0.715 * s) * g + (0.072 - 0.072 * s) * b,
+    (0.213 - 0.213 * s) * r + (0.715 + 0.285 * s) * g + (0.072 - 0.072 * s) * b,
+    (0.213 - 0.213 * s) * r + (0.715 - 0.715 * s) * g + (0.072 + 0.928 * s) * b,
+  ].map((v) => Math.round(Math.min(255, Math.max(0, v))));
+}
+const SAT = 1.7; // backdrop-filter: saturate(170%) dei blocchi della Home e della barra delle schede
+
+// Ogni punto della luce di fondo: le tappe esadecimali di --page-light (l'ultima è il fondo) e le loro miscele a passi
+// di 0,1 in coordinate baricentriche, che coprono anche le zone dove due o tre luci si sovrappongono.
+function lightPoints(T) {
+  const vs = stops(T['page-light']);
+  assert.equal(vs.length, 4, '--page-light: tre luci e il fondo');
+  const out = [];
+  const N = 10;
+  for (let a = 0; a <= N; a++) for (let b = 0; a + b <= N; b++) for (let c = 0; a + b + c <= N; c++) {
+    const w = [a, b, c, N - a - b - c].map((x) => x / N);
+    out.push(vs[0].map((_, i) => Math.round(vs.reduce((t, v, k) => t + v[i] * w[k], 0))));
+  }
+  return out;
+}
+
+// Colore risultante del vetro: --glass sopra il punto della luce, con e senza saturate (card fuori dalla Home).
+function glassColors(T) {
+  const g = rgba(T.glass);
+  const seen = new Map();
+  for (const p of lightPoints(T)) for (const back of [p, saturate(p, SAT)]) {
+    const c = over(g.c, g.a, back);
+    seen.set(c.join(','), c);
+  }
+  return [...seen.values()];
+}
+
+// Testi che stanno sul vetro: testo, grigio, verde e rosso, avvisi, colori d'ambito (titoli delle card con tinta),
+// colore progressivo di Quanto ti resta (ogni 1 %).
+function glassForegrounds(T) {
+  const out = [['testo', hex(T.text)], ['grigio secondario', hex(T.muted)], ['verde', hex(T.accent)], ['rosso', hex(T.danger)], ['avviso', hex(T.warning)], ['entrate', hex(T.income)]];
+  for (const k of TINTS) out.push([`tinta ${k}`, hex(T[k])]);
+  for (const [label, c] of progColors(T)) out.push([`Quanto ti resta, ${label}`, c]);
+  return out;
+}
+
+// Gradiente lineare a 180°: colore (premoltiplicato) alla posizione pct, con le tappe rgba(...) [p%].
+function gradStops(s) {
+  const list = [...s.matchAll(/rgba\((\d+),\s*(\d+),\s*(\d+),\s*([\d.]+)\)\s*([\d.]+%)?/g)];
+  return list.map((m, i) => ({ c: [m[1], m[2], m[3]].map(Number), a: Number(m[4]), p: m[5] ? parseFloat(m[5]) : (i === 0 ? 0 : 100) }));
+}
+function gradOver(s, pct, bg) {
+  const st = gradStops(s);
+  let i = 0;
+  while (i < st.length - 2 && pct > st[i + 1].p) i++;
+  const a = st[i]; const b = st[i + 1] || a;
+  const t = pct <= a.p ? 0 : pct >= b.p ? 1 : (pct - a.p) / (b.p - a.p);
+  const alpha = a.a + (b.a - a.a) * t;
+  const pre = a.c.map((v, k) => v * a.a + (b.c[k] * b.a - v * a.a) * t);
+  return bg.map((v, k) => Math.round(pre[k] + v * (1 - alpha)));
+}
+// Minimo contrasto lungo una fascia del pulsante (dal from % al to % dell'altezza, a passi di 1 %).
+const bandMin = (fg, grad, fill, from, to) => {
+  let min = Infinity;
+  for (let p = from; p <= to; p++) min = Math.min(min, ratio(fg, gradOver(grad, p, fill)));
+  return min;
+};
+const BADGE_GLOSS = /\.mini-badge \{ background-image: (linear-gradient\([^;]+\)); \}/.exec(css)?.[1];
+
+// Coppie [descrizione, rapporto, minimo] del materiale v9.
+function glassPairs(T) {
+  const out = [];
+  const glass = glassColors(T);
+  for (const [what, fg] of glassForegrounds(T)) {
+    out.push([`vetro: ${what} (peggiore su ${glass.length} punti della luce)`, Math.min(...glass.map((g) => ratio(fg, g))), 4.5]);
+  }
+  // Testo dei pulsanti: fascia 20–80 % dell'altezza (testo da 15–17 px su 36–44 px). Glifi delle icone: 18–82 %.
+  const white = [255, 255, 255];
+  for (const k of ['accent', 'amber', 'pink']) out.push([`pulsante pieno ${k}: bianco sul riflesso`, bandMin(white, T['gloss-fill'], hex(fillOf(T, k)), 20, 80), 4.5]);
+  out.push(['pulsante tenue / scheda attiva: verde sul riflesso', bandMin(hex(T.accent), T['gloss-soft'], hex(T['accent-soft']), 20, 80), 4.5]);
+  out.push(['pulsante ambra tenue: ambra sul riflesso', bandMin(hex(T.amber), T['gloss-soft'], hex(T['amber-soft']), 20, 80), 4.5]);
+  out.push(['pulsante rosa tenue: rosa sul riflesso', bandMin(hex(T.pink), T['gloss-soft'], hex(T['pink-soft']), 20, 80), 4.5]);
+  out.push(['segmento scelto: testo sul riflesso', bandMin(hex(T.text), T['gloss-soft'], hex(T['segment-on']), 20, 80), 4.5]);
+  assert.ok(BADGE_GLOSS, 'riflesso delle icone non trovato in app.css');
+  const fills = ['accent', 'teal', 'indigo', 'violet', 'amber', 'pink', 'butter'].map((k) => [k, hex(fillOf(T, k))]);
+  fills.push(['grafite', hex('#5C5E65')]);
+  for (const [k, f] of fills) out.push([`icona ${k}: glifo bianco sul riflesso`, bandMin(white, BADGE_GLOSS, f, 18, 82), 3]);
+  return out;
+}
+
+for (const [name, T] of [['chiaro', LIGHT], ['scuro', DARK]]) {
+  test(`v9 vetro e riflessi: contrasto WCAG AA, tema ${name}`, () => {
+    const bad = glassPairs(T).filter(([, r, need]) => r < need).map(([what, r, need]) => `${what}: ${r.toFixed(2)} < ${need}`);
+    assert.deepEqual(bad, []);
+  });
+}
+
+test('v9: il riflesso dei pulsanti pieni resta sopra la fascia del testo', () => {
+  for (const T of [LIGHT, DARK]) {
+    const st = gradStops(T['gloss-fill']);
+    for (const s of st) if (s.p >= 20 && s.c[0] === 255) assert.ok(s.a <= 0.06, `riflesso ${s.a} al ${s.p}%`);
+  }
+});
+
 test('i token del tema automatico scuro sono uguali a quelli del tema scuro', () => {
   assert.deepEqual(AUTO, DARK);
 });
@@ -147,5 +251,13 @@ if (process.argv.includes('--table')) {
       const min = (kind) => Math.min(...ps.filter(([w]) => w.endsWith(kind)).map(([, fg, bg]) => ratio(fg, bg))).toFixed(2).replace('.', ',');
       console.log(`| ${name} | prog-${k}→${k + 1} | ${min('testo')}:1 | ${min('traccia')}:1 |`);
     }
+  }
+  // v9: vetro (peggiore su ogni punto della luce) e riflessi dei pulsanti; il colore progressivo come minimo.
+  console.log('\n| Tema | Coppia v9 | Rapporto | Minimo |\n|---|---|---|---|');
+  for (const [name, T] of [['chiaro', LIGHT], ['scuro', DARK]]) {
+    const ps = glassPairs(T);
+    for (const [what, r, need] of ps.filter(([w]) => !w.includes('Quanto ti resta'))) console.log(`| ${name} | ${what} | ${r.toFixed(2).replace('.', ',')}:1 | ${need}:1 |`);
+    const prog = Math.min(...ps.filter(([w]) => w.includes('Quanto ti resta')).map(([, r]) => r));
+    console.log(`| ${name} | vetro: Quanto ti resta, colore progressivo (minimo di 303 colori) | ${prog.toFixed(2).replace('.', ',')}:1 | 4.5:1 |`);
   }
 }
