@@ -1,32 +1,46 @@
-// Test di js/prefs.js: valori predefiniti, primo uso, salvataggio.
-import { test } from 'node:test';
+import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createPrefs, PREFS_KEY } from '../js/prefs.js';
-import { memoryStorage } from './helpers.js';
+import { readPrefs, writePrefs, backupReminder, readBeforeImport, writeBeforeImport, clearBeforeImport, PREFS_KEY } from '../js/prefs.js';
+import { memStorage } from './helpers.js';
 
-test('predefiniti e firstUseAt al primo avvio', () => {
-  const storage = memoryStorage();
-  const p = createPrefs(storage, () => 1000);
-  assert.equal(p.get().theme, 'auto');
-  assert.equal(p.get().csvFormat, 'semicolon');
-  assert.equal(p.get().firstUseAt, 1000);
-  p.set({ theme: 'dark', csvFormat: 'comma' });
-  const q = createPrefs(storage, () => 2000);
-  assert.deepEqual([q.get().theme, q.get().csvFormat, q.get().firstUseAt], ['dark', 'comma', 1000]);
+const DAY = 86400000;
+
+test('preferenze: valori predefiniti, valori non validi ignorati', () => {
+  const st = memStorage();
+  assert.deepEqual(readPrefs(st), { theme: 'light', csvFormat: 'virgola', lastBackupAt: null, tax: null });
+  writePrefs(st, { theme: 'dark' });
+  assert.equal(readPrefs(st).theme, 'dark');
+  st.setItem(PREFS_KEY, JSON.stringify({ theme: 'viola', lastBackupAt: -1, csvFormat: 'excel' }));
+  assert.deepEqual(readPrefs(st), { theme: 'light', csvFormat: 'excel', lastBackupAt: null, tax: null });
+  st.setItem(PREFS_KEY, '{rotto');
+  assert.equal(readPrefs(st).theme, 'light');
+  assert.equal(writePrefs(memStorage({}, { failSet: () => true }), { theme: 'auto' }), false);
 });
 
-test('preferenze illeggibili → predefiniti', () => {
-  const storage = memoryStorage({ [PREFS_KEY]: '{x' });
-  assert.equal(createPrefs(storage, () => 1).get().theme, 'auto');
+test('promemoria backup dopo 14 giorni e solo se i dati sono cambiati', () => {
+  const now = 100 * DAY;
+  assert.deepEqual(backupReminder({ lastBackupAt: null, lastChangeAt: 5, hasData: false, now }), { due: false, days: null });
+  assert.deepEqual(backupReminder({ lastBackupAt: null, lastChangeAt: 5, hasData: true, now }), { due: true, days: null });
+  assert.equal(backupReminder({ lastBackupAt: now - 13 * DAY, lastChangeAt: now, hasData: true, now }).due, false);
+  assert.equal(backupReminder({ lastBackupAt: now - 14 * DAY, lastChangeAt: now, hasData: true, now }).due, true);
+  assert.equal(backupReminder({ lastBackupAt: now - 20 * DAY, lastChangeAt: now - 30 * DAY, hasData: true, now }).due, false);
 });
 
-test('v4: periodo di budget predefinito = mese di calendario', () => {
-  const storage = memoryStorage();
-  const p = createPrefs(storage, () => 1);
-  assert.equal(p.get().budgetPeriod, 'calendar');
-  p.set({ budgetPeriod: 'salary' });
-  assert.equal(createPrefs(storage, () => 2).get().budgetPeriod, 'salary');
-  // preferenze della v3 senza la chiave: predefinito
-  const old = memoryStorage({ [PREFS_KEY]: JSON.stringify({ theme: 'dark', firstUseAt: 5 }) });
-  assert.equal(createPrefs(old, () => 3).get().budgetPeriod, 'calendar');
+test('copia di sicurezza prima dell\'importazione', () => {
+  const st = memStorage();
+  assert.equal(readBeforeImport(st), null);
+  assert.equal(writeBeforeImport(st, { app: 'DentalFlow' }, 123), true);
+  assert.deepEqual(readBeforeImport(st), { savedAt: 123, backup: { app: 'DentalFlow' } });
+  assert.equal(clearBeforeImport(st), true);
+  assert.equal(readBeforeImport(st), null);
+});
+
+test('parametri delle tasse nelle preferenze: salvati, valori errati corretti', () => {
+  const st = memStorage();
+  writePrefs(st, { tax: { coeff: 7800, inps: 2400, rate: 500, bollo: 200 } });
+  assert.deepEqual(readPrefs(st).tax, { coeff: 7800, inps: 2400, rate: 500, bollo: 200, openDate: null, excluded: [], fixedPct: null, declared: {} });
+  st.setItem(PREFS_KEY, JSON.stringify({ tax: { coeff: 'x', inps: 2400 } }));
+  assert.deepEqual(readPrefs(st).tax, { coeff: 7800, inps: 2400, rate: 500, bollo: 200, openDate: null, excluded: [], fixedPct: null, declared: {} });
+  st.setItem(PREFS_KEY, JSON.stringify({ tax: [1] }));
+  assert.equal(readPrefs(st).tax, null);
 });

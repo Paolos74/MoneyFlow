@@ -1,236 +1,214 @@
 #!/usr/bin/env python3
-# Genera l'icona di MoneyFlow v4 (solo libreria standard): due banconote stilizzate sovrapposte, una dorata dietro e una verde
-# davanti con il simbolo €, angoli arrotondati e leggera inclinazione, su sfondo menta-crema. La geometria è definita una volta
-# sola (NOTES) e serve sia alla sorgente vettoriale (icons/moneyflow-v4.svg, favicon SVG) sia ai PNG (rasterizzati qui).
+"""Genera le icone PNG di DentalFlow usando solo la libreria standard (zlib + struct).
+
+Disegno: sfondo a gradiente diagonale (azzurro #2F8CFF in alto a sinistra -> blu indaco #3D4FE0 in basso
+a destra) con un dente bianco morbido: corona a due lobi e radici affusolate fuse con un "minimo morbido"
+(niente spigoli né scalini), più un'ombra leggera sotto il dente.
+Antialias: supersampling 4x (4x4 campioni) sui pixel vicini ai bordi, poi media (box filter).
+
+Uso:  python3 tools/make_icons.py   (scrive in icons/)
+"""
 import math
 import os
 import struct
+import sys
 import zlib
 
-OUT = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'icons')
-# Nomi con la versione: i telefoni non riusano l'icona vecchia dalla cache.
-FILES = {
-    'svg': 'moneyflow-v4.svg',
-    'favicon_svg': 'moneyflow-v4-favicon.svg',
-    'any192': 'moneyflow-v4-192.png',
-    'any512': 'moneyflow-v4-512.png',
-    'maskable': 'moneyflow-v4-maskable-512.png',
-    'apple': 'moneyflow-v4-apple-touch-180.png',
-    'favicon': 'moneyflow-v4-favicon-32.png',
-}
+OUT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'icons')
+SS = 4  # supersampling per asse
 
-# Sfondo: gradiente diagonale dall'alto a sinistra (menta) al basso a destra (crema).
-BG_FROM, BG_TO = '#DDF3E6', '#FCEFD3'
-
-# Banconote in coordinate [0,1] del soggetto (y verso il basso). angle in gradi, positivo = senso orario (come SVG rotate).
-NOTES = [
-    {   # dietro: dorata
-        'cx': 0.555, 'cy': 0.395, 'w': 0.62, 'h': 0.36, 'r': 0.055, 'angle': -14.0,
-        'top': '#F9D77E', 'bottom': '#E6AA35', 'frame': '#B97C0E', 'medal': '#FCEBB8', 'euro': None,
-    },
-    {   # davanti: verde con €
-        'cx': 0.455, 'cy': 0.610, 'w': 0.62, 'h': 0.36, 'r': 0.055, 'angle': 8.0,
-        'top': '#14A673', 'bottom': '#047857', 'frame': '#7FDDB4', 'medal': '#E9F8EF', 'euro': '#047857',
-    },
-]
-FRAME_INSET, FRAME_W = 0.032, 0.012     # cornice interna della banconota
-MEDAL_R = 0.100                          # medaglione centrale
-DOT_R, DOT_X, DOT_Y = 0.020, 0.215, 0.105  # pallini negli angoli (coordinate locali dal centro)
-EURO_R, EURO_W, EURO_GAP = 0.056, 0.020, 42.0  # anello del simbolo €: raggio, spessore, mezza apertura a destra (gradi)
-EURO_BARS = [(-0.016, 0.013), (0.014, 0.013)]  # barre: (y dal centro, spessore)
-EURO_BAR_X0, EURO_BAR_X1 = -0.088, 0.018
-SHADOW_DY, SHADOW_ALPHA = 0.018, 0.16    # ombra netta sotto ogni banconota
+TOP_LEFT = (0x2F, 0x8C, 0xFF)
+BOTTOM_RIGHT = (0x3D, 0x4F, 0xE0)
+WHITE = (255, 255, 255)
+SHADOW = (0x12, 0x2A, 0x8C)
 
 
-def hex2rgb(h):
-    h = h.lstrip('#')
-    return tuple(int(h[i:i + 2], 16) for i in (0, 2, 4))
+# ---------- funzioni di distanza (unità del glifo: il dente sta nel cerchio di raggio ~1) ----------
 
+def sd_round_box(x, y, cx, cy, hw, hh, r):
+    qx = abs(x - cx) - hw + r
+    qy = abs(y - cy) - hh + r
+    ox = max(qx, 0.0)
+    oy = max(qy, 0.0)
+    return math.hypot(ox, oy) + min(max(qx, qy), 0.0) - r
+
+
+def sd_round_cone(px, py, ax, ay, bx, by, r1, r2):
+    """Segmento con raggio che va da r1 (in a) a r2 (in b): radice affusolata con estremità tonde."""
+    bax, bay = bx - ax, by - ay
+    l2 = bax * bax + bay * bay
+    rr = r1 - r2
+    a2 = l2 - rr * rr
+    il2 = 1.0 / l2
+    pax, pay = px - ax, py - ay
+    y = pax * bax + pay * bay
+    z = y - l2
+    qx, qy = pax * l2 - bax * y, pay * l2 - bay * y
+    x2 = qx * qx + qy * qy
+    y2 = y * y * l2
+    z2 = z * z * l2
+    k = math.copysign(1.0, rr) * rr * rr * x2
+    if math.copysign(1.0, z) * a2 * z2 > k:
+        return math.sqrt(x2 + z2) * il2 - r2
+    if math.copysign(1.0, y) * a2 * y2 < k:
+        return math.sqrt(x2 + y2) * il2 - r1
+    return (math.sqrt(x2 * a2 * il2) + y * rr) * il2 - r1
+
+
+def smin(a, b, k):
+    """Minimo morbido: unisce due forme con un raccordo di ampiezza k."""
+    h = max(k - abs(a - b), 0.0) / k
+    return min(a, b) - h * h * k * 0.25
+
+
+def sd_tooth(x, y):
+    lobe_l = math.hypot(x + 0.31, y + 0.33) - 0.37
+    lobe_r = math.hypot(x - 0.31, y + 0.33) - 0.37
+    d = smin(lobe_l, lobe_r, 0.10)  # la piccola valle tra i lobi resta, ma senza punta
+    d = smin(d, sd_round_box(x, y, 0.0, -0.13, 0.64, 0.21, 0.21), 0.22)
+    root_l = sd_round_cone(x, y, -0.37, 0.05, -0.23, 0.80, 0.27, 0.10)
+    root_r = sd_round_cone(x, y, 0.37, 0.05, 0.23, 0.80, 0.27, 0.10)
+    d = smin(d, root_l, 0.26)
+    d = smin(d, root_r, 0.26)
+    return d
+
+
+def glyph_extent():
+    """Distanza massima dal centro dei punti del dente (scansione fitta), per il controllo della safe zone."""
+    ext = 0.0
+    n = 600
+    for j in range(n):
+        y = -1.2 + 2.4 * j / (n - 1)
+        for i in range(n):
+            x = -1.2 + 2.4 * i / (n - 1)
+            if sd_tooth(x, y) < 0:
+                ext = max(ext, math.hypot(x, y))
+    return ext + 0.01
+
+
+# ---------- rendering ----------
 
 def lerp(a, b, t):
-    return tuple(a[i] + (b[i] - a[i]) * t for i in range(3))
+    return a + (b - a) * t
 
 
-def rr_inside(x, y, hw, hh, r):
-    """Punto (x, y) dentro il rettangolo arrotondato centrato nell'origine con semiassi hw, hh e raggio r."""
-    ax, ay = abs(x), abs(y)
-    if ax > hw or ay > hh:
-        return False
-    qx, qy = ax - (hw - r), ay - (hh - r)
-    if qx <= 0 or qy <= 0:
-        return True
-    return qx * qx + qy * qy <= r * r
+def render(size, glyph_scale, rounded_bg):
+    """Ritorna (pixels RGBA come bytearray, maschera glifo come lista di bool)."""
+    cx = cy = size / 2.0
+    radius_bg = 0.22 * size
+    px = bytearray(size * size * 4)
+    glyph_mask = [False] * (size * size)
+    unit = 1.0 / glyph_scale  # 1 pixel in unità glifo
+    edge = 1.5 * unit  # banda larga: il minimo morbido non è una distanza esatta
+    sub = [(i + 0.5) / SS for i in range(SS)]
+
+    def bg_sd(x, y):
+        if not rounded_bg:
+            return -1.0
+        return sd_round_box(x, y, cx, cy, size / 2.0, size / 2.0, radius_bg)
+
+    for j in range(size):
+        for i in range(size):
+            pxc, pyc = i + 0.5, j + 0.5
+            t = min(1.0, max(0.0, (i + j) / (2.0 * (size - 1))))  # gradiente diagonale
+            bg_col = tuple(lerp(TOP_LEFT[c], BOTTOM_RIGHT[c], t) for c in range(3))
+            # ombra morbida sotto il dente (spostata in basso), sfumata con la distanza
+            ds = sd_tooth((pxc - cx) / glyph_scale, (pyc - cy) / glyph_scale - 0.07)
+            sh = 0.28 * min(1.0, max(0.0, 1.0 - (ds + 0.02) / 0.16))
+            if sh > 0:
+                bg_col = tuple(lerp(bg_col[c], SHADOW[c], sh) for c in range(3))
+            # copertura sfondo
+            dbg = bg_sd(pxc, pyc)
+            if dbg < -0.75:
+                cov_bg = 1.0
+            elif dbg > 0.75:
+                cov_bg = 0.0
+            else:
+                hits = 0
+                for sy in sub:
+                    for sx in sub:
+                        if bg_sd(i + sx, j + sy) < 0:
+                            hits += 1
+                cov_bg = hits / (SS * SS)
+            # copertura dente
+            gx, gy = (pxc - cx) / glyph_scale, (pyc - cy) / glyph_scale
+            dt = sd_tooth(gx, gy)
+            if dt < -edge:
+                cov_t = 1.0
+            elif dt > edge:
+                cov_t = 0.0
+            else:
+                hits = 0
+                for sy in sub:
+                    for sx in sub:
+                        if sd_tooth((i + sx - cx) / glyph_scale, (j + sy - cy) / glyph_scale) < 0:
+                            hits += 1
+                cov_t = hits / (SS * SS)
+            if cov_t > 0:
+                glyph_mask[j * size + i] = True
+            # composizione: dente sopra sfondo (il dente è dentro lo sfondo)
+            r = lerp(bg_col[0], WHITE[0], cov_t)
+            g = lerp(bg_col[1], WHITE[1], cov_t)
+            b = lerp(bg_col[2], WHITE[2], cov_t)
+            a = max(cov_bg, cov_t)
+            k = (j * size + i) * 4
+            px[k] = int(round(r))
+            px[k + 1] = int(round(g))
+            px[k + 2] = int(round(b))
+            px[k + 3] = int(round(a * 255))
+    return px, glyph_mask
 
 
-def to_local(n, u, v):
-    a = math.radians(n['angle'])
-    dx, dy = u - n['cx'], v - n['cy']
-    return dx * math.cos(a) + dy * math.sin(a), -dx * math.sin(a) + dy * math.cos(a)
-
-
-def in_euro(x, y):
-    d = math.hypot(x, y)
-    ang = math.degrees(math.atan2(-y, x))
-    if abs(d - EURO_R) <= EURO_W / 2 and abs(ang) > EURO_GAP:
-        return True
-    for by, bw in EURO_BARS:
-        if EURO_BAR_X0 <= x <= EURO_BAR_X1 and abs(y - by) <= bw / 2:
-            return True
-    return False
-
-
-def note_color(n, x, y):
-    """Colore della banconota nel punto locale (x, y) o None se fuori."""
-    hw, hh, r = n['w'] / 2, n['h'] / 2, n['r']
-    if not rr_inside(x, y, hw, hh, r):
-        return None
-    if n['euro'] and in_euro(x, y):
-        return hex2rgb(n['euro'])
-    if math.hypot(x, y) <= MEDAL_R:
-        return hex2rgb(n['medal'])
-    for sx in (-1, 1):
-        for sy in (-1, 1):
-            if math.hypot(x - sx * DOT_X, y - sy * DOT_Y) <= DOT_R:
-                return hex2rgb(n['frame'])
-    i = FRAME_INSET
-    if rr_inside(x, y, hw - i, hh - i, r - i / 2) and not rr_inside(x, y, hw - i - FRAME_W, hh - i - FRAME_W, r - i / 2 - FRAME_W):
-        return hex2rgb(n['frame'])
-    t = (y + hh) / (2 * hh)
-    return lerp(hex2rgb(n['top']), hex2rgb(n['bottom']), t)
-
-
-def subject(u, v, base):
-    """Colore del soggetto sopra il colore di fondo base; restituisce (colore, è soggetto)."""
-    c, hit = base, False
-    for n in NOTES:
-        x, y = to_local(n, u, v - SHADOW_DY)
-        if rr_inside(x, y, n['w'] / 2, n['h'] / 2, n['r']):
-            c = lerp(c, (0, 40, 30), SHADOW_ALPHA)
-        x, y = to_local(n, u, v)
-        col = note_color(n, x, y)
-        if col is not None:
-            c, hit = col, True
-    return c, hit
-
-
-def bg_color(fx, fy):
-    return lerp(hex2rgb(BG_FROM), hex2rgb(BG_TO), max(0.0, min(1.0, (fx + fy) / 2)))
-
-
-def subject_extent():
-    """Distanza massima dal centro (0.5, 0.5) degli angoli delle banconote, nello spazio del soggetto."""
-    best = 0.0
-    for n in NOTES:
-        a = math.radians(n['angle'])
-        for sx in (-1, 1):
-            for sy in (-1, 1):
-                x, y = sx * n['w'] / 2, sy * n['h'] / 2
-                u = n['cx'] + x * math.cos(a) - y * math.sin(a)
-                v = n['cy'] + x * math.sin(a) + y * math.cos(a)
-                best = max(best, math.hypot(u - 0.5, v - 0.5))
-    return best
-
-
-def png(path, size, scale, rounded=False, sub=4, radius=0.22):
-    rows = []
-    s0 = (1 - scale) / 2
-    for y in range(size):
-        row = bytearray([0])
-        for x in range(size):
-            acc = [0.0, 0.0, 0.0]
-            alpha = 0
-            for sy in range(sub):
-                for sx in range(sub):
-                    fx = (x + (sx + 0.5) / sub) / size
-                    fy = (y + (sy + 0.5) / sub) / size
-                    if rounded and not rr_inside(fx - 0.5, fy - 0.5, 0.5, 0.5, radius):
-                        continue
-                    alpha += 1
-                    c, _ = subject((fx - s0) / scale, (fy - s0) / scale, bg_color(fx, fy))
-                    for i in range(3):
-                        acc[i] += c[i]
-            col = bytes(round(acc[i] / alpha) for i in range(3)) if alpha else bytes(3)
-            row += col + bytes([round(255 * alpha / (sub * sub))])
-        rows.append(bytes(row))
-    raw = b''.join(rows)
-
+def png_bytes(size, rgba):
     def chunk(tag, data):
         c = struct.pack('>I', len(data)) + tag + data
         return c + struct.pack('>I', zlib.crc32(tag + data) & 0xFFFFFFFF)
 
-    data = b'\x89PNG\r\n\x1a\n' + chunk(b'IHDR', struct.pack('>IIBBBBB', size, size, 8, 6, 0, 0, 0))
-    data += chunk(b'IDAT', zlib.compress(raw, 9)) + chunk(b'IEND', b'')
-    with open(path, 'wb') as f:
-        f.write(data)
-    print('creato', os.path.relpath(path), size)
+    raw = bytearray()
+    stride = size * 4
+    for y in range(size):
+        raw.append(0)  # filtro 0 (None)
+        raw.extend(rgba[y * stride:(y + 1) * stride])
+    ihdr = struct.pack('>IIBBBBB', size, size, 8, 6, 0, 0, 0)
+    return (b'\x89PNG\r\n\x1a\n' + chunk(b'IHDR', ihdr)
+            + chunk(b'IDAT', zlib.compress(bytes(raw), 9)) + chunk(b'IEND', b''))
 
 
-def f(n):
-    return f'{n * 512:.2f}'.rstrip('0').rstrip('.')
-
-
-def svg(path, scale, rounded, radius=0.22):
-    """Sorgente vettoriale con la stessa geometria dei PNG (viewBox 512)."""
-    s0 = (1 - scale) / 2 * 512
-    out = ['<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">',
-           '<title>MoneyFlow</title>',
-           '<defs><linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">'
-           f'<stop offset="0" stop-color="{BG_FROM}"/><stop offset="1" stop-color="{BG_TO}"/></linearGradient>']
-    for i, n in enumerate(NOTES):
-        out.append(f'<linearGradient id="n{i}" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="{n["top"]}"/>'
-                   f'<stop offset="1" stop-color="{n["bottom"]}"/></linearGradient>')
-    if rounded:
-        out.append(f'<clipPath id="clip"><rect width="512" height="512" rx="{f(radius)}"/></clipPath>')
-    out.append('</defs>')
-    out.append(f'<rect width="512" height="512" rx="{f(radius) if rounded else 0}" fill="url(#bg)"/>')
-    clip = ' clip-path="url(#clip)"' if rounded else ''
-    out.append(f'<g{clip}><g transform="translate({s0:.2f} {s0:.2f}) scale({scale})">')
-    for i, n in enumerate(NOTES):
-        hw, hh, r = n['w'] / 2, n['h'] / 2, n['r']
-        rot = f'rotate({n["angle"]} {f(n["cx"])} {f(n["cy"])})'
-        x0, y0 = n['cx'] - hw, n['cy'] - hh
-        out.append(f'<rect x="{f(x0)}" y="{f(y0 + SHADOW_DY)}" width="{f(n["w"])}" height="{f(n["h"])}" rx="{f(r)}" fill="#00281E" fill-opacity="{SHADOW_ALPHA}" transform="rotate({n["angle"]} {f(n["cx"])} {f(n["cy"] + SHADOW_DY)})"/>')
-        out.append(f'<g transform="{rot}">')
-        out.append(f'<rect x="{f(x0)}" y="{f(y0)}" width="{f(n["w"])}" height="{f(n["h"])}" rx="{f(r)}" fill="url(#n{i})"/>')
-        ins = FRAME_INSET + FRAME_W / 2
-        out.append(f'<rect x="{f(x0 + ins)}" y="{f(y0 + ins)}" width="{f(n["w"] - 2 * ins)}" height="{f(n["h"] - 2 * ins)}" rx="{f(r - ins / 2 - FRAME_W / 4)}" fill="none" stroke="{n["frame"]}" stroke-width="{f(FRAME_W)}"/>')
-        for sx in (-1, 1):
-            for sy in (-1, 1):
-                out.append(f'<circle cx="{f(n["cx"] + sx * DOT_X)}" cy="{f(n["cy"] + sy * DOT_Y)}" r="{f(DOT_R)}" fill="{n["frame"]}"/>')
-        out.append(f'<circle cx="{f(n["cx"])}" cy="{f(n["cy"])}" r="{f(MEDAL_R)}" fill="{n["medal"]}"/>')
-        if n['euro']:
-            g = math.radians(EURO_GAP)
-            ax, ay = n['cx'] + EURO_R * math.cos(g), n['cy'] - EURO_R * math.sin(g)
-            bx, by = n['cx'] + EURO_R * math.cos(g), n['cy'] + EURO_R * math.sin(g)
-            out.append(f'<path d="M{f(ax)} {f(ay)}A{f(EURO_R)} {f(EURO_R)} 0 1 0 {f(bx)} {f(by)}" fill="none" stroke="{n["euro"]}" stroke-width="{f(EURO_W)}"/>')
-            for yy, bw in EURO_BARS:
-                out.append(f'<rect x="{f(n["cx"] + EURO_BAR_X0)}" y="{f(n["cy"] + yy - bw / 2)}" width="{f(EURO_BAR_X1 - EURO_BAR_X0)}" height="{f(bw)}" fill="{n["euro"]}"/>')
-        out.append('</g>')
-    out.append('</g></g></svg>\n')
-    with open(path, 'w', encoding='utf-8') as fh:
-        fh.write('\n'.join(out))
-    print('creato', os.path.relpath(path))
+def check_safe_zone(name, size, mask):
+    limit = 0.36 * size
+    c = size / 2.0
+    for j in range(size):
+        for i in range(size):
+            if mask[j * size + i] and math.hypot(i + 0.5 - c, j + 0.5 - c) > limit:
+                print(f'ERRORE: {name}: pixel del glifo ({i},{j}) fuori dal cerchio sicuro di raggio {limit:.1f}px',
+                      file=sys.stderr)
+                return False
+    return True
 
 
 def main():
-    os.makedirs(OUT, exist_ok=True)
-    ext = subject_extent()
-    any_scale = 0.86
-    # maskable: tutto il soggetto dentro il cerchio centrale del 72% (raggio 0,36 del lato)
-    mask_scale = round(0.355 / ext, 3)
-    print(f'raggio del soggetto: {ext:.3f}; maskable scala {mask_scale} → raggio {ext * mask_scale:.3f} (limite 0,36)')
-    assert ext * mask_scale <= 0.36
-    assert ext * any_scale <= 0.5 * math.sqrt(2)
-    svg(os.path.join(OUT, FILES['svg']), any_scale, rounded=False)
-    # favicon: soggetto ingrandito (scala 1,18) e angoli meno tondi, per leggere banconote e € a 16-32 px
-    fav_scale, fav_radius = 1.18, 0.18
-    svg(os.path.join(OUT, FILES['favicon_svg']), fav_scale, rounded=True, radius=fav_radius)
-    png(os.path.join(OUT, FILES['any192']), 192, any_scale)
-    png(os.path.join(OUT, FILES['any512']), 512, any_scale)
-    png(os.path.join(OUT, FILES['maskable']), 512, mask_scale)
-    png(os.path.join(OUT, FILES['apple']), 180, any_scale)
-    png(os.path.join(OUT, FILES['favicon']), 32, fav_scale, rounded=True, radius=fav_radius)
+    os.makedirs(OUT_DIR, exist_ok=True)
+    ext = glyph_extent()
+    # (file, lato, sfondo arrotondato, scala del glifo in px per unità, controllo safe zone)
+    specs = [
+        ('icon-192.png', 192, True, 0.40, False),
+        ('icon-512.png', 512, True, 0.40, False),
+        ('favicon-32.png', 32, True, 0.42, False),
+        # full-bleed: l'intero glifo sta in un cerchio di diametro 72% (raggio 0.36*size), con margine
+        ('icon-maskable-512.png', 512, False, 0.36 * 0.94 / ext, True),
+        ('apple-touch-icon.png', 180, False, 0.36 * 0.94 / ext, True),
+    ]
+    ok = True
+    for name, size, rounded, scale_frac, check in specs:
+        px, mask = render(size, scale_frac * size, rounded)
+        if check and not check_safe_zone(name, size, mask):
+            ok = False
+            continue
+        with open(os.path.join(OUT_DIR, name), 'wb') as f:
+            f.write(png_bytes(size, px))
+        print(f'scritto icons/{name} ({size}x{size})')
+    return 0 if ok else 1
 
 
 if __name__ == '__main__':
-    main()
+    sys.exit(main())

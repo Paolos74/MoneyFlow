@@ -1,288 +1,295 @@
-// Avvio di MoneyFlow: store, preferenze, sync, router con hash, barra in alto e schede,
-// service worker con banner "Aggiorna", installazione, pillola Offline, più schede aperte.
-
-import { createStore, DATA_KEY, INVEST_KEY } from './store.js';
-import { createPrefs, PREFS_KEY } from './prefs.js';
-import { createSync, SYNC_KEY } from './sync.js';
-import { createTaxSettings, TAX_KEY } from './tax-settings.js';
-import { el, icon, clear, preserveFocus } from './ui.js';
-import { todayISO } from './dates.js';
-import { resolveRoute } from './routes.js';
-import { openQuickAdd } from './views/movimento-form.js';
-import { reconcileInterest } from './interest.js';
-import * as home from './views/home.js';
-import * as daConfermare from './views/da-confermare.js';
-import * as daRicevere from './views/da-ricevere.js';
-import * as programmati from './views/programmati.js';
-import * as movimenti from './views/movimenti.js';
+// Avvio: store, router, viste, service worker, banner di aggiornamento, installazione, sincronizzazione.
+import { createStore } from './store.js';
+import { createSync } from './sync.js';
+import { el } from './ui.js';
+import { readPrefs, writePrefs } from './prefs.js';
+import * as oggi from './views/oggi.js';
+import * as inserisci from './views/inserisci.js';
+import * as registro from './views/registro.js';
+import * as riepilogo from './views/riepilogo.js';
+import * as gestione from './views/gestione.js';
 import * as calendario from './views/calendario.js';
-import * as statistiche from './views/statistiche.js';
-import * as stipendio from './views/stipendio.js';
-import * as fondoPensione from './views/fondo-pensione.js';
-import * as budget from './views/budget.js';
-import * as conti from './views/conti.js';
-import * as conto from './views/conto.js';
-import * as investimento from './views/investimento.js';
-import * as obiettivo from './views/obiettivo.js';
-import * as impostazioni from './views/impostazioni.js';
 
-// localStorage incapsulato: i metodi restano legati all'oggetto originale.
-const storage = {
-  getItem: (k) => globalThis.localStorage.getItem(k),
-  setItem: (k, v) => globalThis.localStorage.setItem(k, v),
-  removeItem: (k) => globalThis.localStorage.removeItem(k),
-  keys: () => Object.keys(globalThis.localStorage),
-};
+// Rotte: #oggi, #inserisci, #registro, #recap[/grafici|/tasse], #altro[/pagina[/id]], #calendario[?studio=id].
+const routes = { oggi, inserisci, registro, recap: riepilogo, altro: gestione, calendario };
+// Indirizzi della prima versione: restano validi (segnalibri, icone installate).
+const LEGACY = { riepilogo: 'recap', grafici: 'recap/grafici', gestione: 'altro' };
+// Scheda evidenziata nella barra per le rotte senza scheda propria.
+const TAB_OF = { calendario: 'altro' };
+const DEFAULT_ROUTE = 'oggi';
 
-const prefs = createPrefs(storage);
-const taxSettings = createTaxSettings(storage);
-const store = createStore({ storage, uuid: () => crypto.randomUUID() });
-const sync = createSync({ store, storage, fetch: (...a) => globalThis.fetch(...a) });
-
-const $ = (id) => document.getElementById(id);
-const viewEl = $('view');
-const topbar = $('topbar');
-
-// ---- Tema ----
-const isDark = (theme) => theme === 'dark' || (theme === 'auto' && matchMedia('(prefers-color-scheme: dark)').matches);
-function applyTheme(theme = prefs.get().theme) {
-  document.documentElement.setAttribute('data-theme', theme);
-  document.querySelector('meta[name="theme-color"]')?.setAttribute('content', isDark(theme) ? '#0C0D0F' : '#F6F5F1');
-}
-matchMedia('(prefers-color-scheme: dark)').addEventListener?.('change', () => applyTheme());
-
-// ---- Installazione ----
-// Scelta consapevole (PWA-BASE §7): niente preventDefault, così il banner di Chrome resta.
+// ---------- prompt di installazione (catturato subito, prima di qualunque vista) ----------
 let deferredPrompt = null;
+let firstRenderDone = false;
+addEventListener('beforeinstallprompt', (e) => { e.preventDefault(); deferredPrompt = e; rerender(); });
+addEventListener('appinstalled', () => { deferredPrompt = null; rerender(); });
 const install = {
-  available: () => !!deferredPrompt,
-  installed: () => matchMedia('(display-mode: standalone)').matches || navigator.standalone === true,
-  async prompt() {
-    if (!deferredPrompt) return 'unavailable';
-    const e = deferredPrompt;
+  canInstall: () => !!deferredPrompt,
+  isInstalled: () => matchMedia('(display-mode: standalone)').matches || navigator.standalone === true,
+  prompt: async () => {
+    if (!deferredPrompt) return;
+    const p = deferredPrompt;
     deferredPrompt = null;
-    e.prompt();
-    const choice = await e.userChoice.catch(() => ({ outcome: 'dismissed' }));
+    p.prompt();
+    await p.userChoice;
     rerender();
-    return choice.outcome;
   },
 };
-addEventListener('beforeinstallprompt', (e) => { deferredPrompt = e; if (currentRoute()[0] === 'impostazioni') rerender(); });
-addEventListener('appinstalled', () => { deferredPrompt = null; rerender(); });
 
-// ---- Router ----
-function parseHash() {
-  const raw = decodeURIComponent(location.hash.replace(/^#/, ''));
-  const [p, q = ''] = raw.split('?');
-  return { path: p.split('/').filter(Boolean), query: Object.fromEntries(new URLSearchParams(q)) };
+// ---------- store e sync (wrapper: mai metodi del browser passati "nudi") ----------
+const store = createStore({ storage: window.localStorage, now: () => Date.now(), uuid: () => crypto.randomUUID() });
+const prefs = {
+  get: () => readPrefs(window.localStorage),
+  set: (patch) => writePrefs(window.localStorage, patch),
+};
+/** Tema scelto in Altro → Aspetto: data-theme="light" | "dark" | "auto" su <html>. */
+const darkQuery = matchMedia('(prefers-color-scheme: dark)');
+const THEME_COLOR = { light: '#F2F4F8', dark: '#0B0D12' };
+function applyTheme() {
+  const theme = prefs.get().theme;
+  document.documentElement.dataset.theme = theme;
+  const resolved = theme === 'auto' ? (darkQuery.matches ? 'dark' : 'light') : theme;
+  document.querySelector('meta[name="theme-color"]')?.setAttribute('content', THEME_COLOR[resolved]);
 }
-const currentRoute = () => parseHash().path;
+applyTheme();
+// Automatico: il telefono passa da chiaro a scuro → barra di stato e grafici seguono.
+darkQuery.addEventListener?.('change', () => {
+  if (prefs.get().theme !== 'auto') return;
+  applyTheme();
+  rerender();
+});
+const sync = createSync({ fetch: (...a) => globalThis.fetch(...a), storage: window.localStorage, now: () => Date.now(), store });
 
-// Nomi delle rotte (js/routes.js) → moduli delle viste.
-const VIEWS = {
-  home, 'da-confermare': daConfermare, 'da-ricevere': daRicevere, programmati, movimenti, budget,
-  statistiche, stipendio, 'fondo-pensione': fondoPensione, conti, conto, investimento, obiettivo, impostazioni,
+navigator.storage?.persist?.().catch(() => {});
+try {
+  store.assignMissingColors(); // studi creati con la prima versione: un colore diverso per ciascuno
+} catch (err) {
+  console.warn('assignMissingColors', err);
+}
+
+const view = document.getElementById('view');
+const navLinks = [...document.querySelectorAll('[data-route]')];
+const loadWarningEl = document.getElementById('load-warning');
+
+/** Legge l'hash: {route, path, query}; i vecchi indirizzi vengono riscritti con replaceState. */
+function parseHash() {
+  const h = location.hash.replace(/^#/, '');
+  const qi = h.indexOf('?');
+  const pathPart = qi < 0 ? h : h.slice(0, qi);
+  const query = new URLSearchParams(qi < 0 ? '' : h.slice(qi + 1));
+  let segs = pathPart.split('/').filter(Boolean);
+  if (LEGACY[segs[0]]) {
+    const target = LEGACY[segs[0]];
+    history.replaceState(null, '', `#${target}`);
+    segs = target.split('/');
+  }
+  if (!routes[segs[0]]) return { route: DEFAULT_ROUTE, path: [], query: new URLSearchParams() };
+  return { route: segs[0], path: segs.slice(1), query };
+}
+
+function currentRoute() {
+  return parseHash().route;
+}
+
+const navigate = (route) => { location.hash = `#${route}`; };
+
+// Parametri passati alla vista successiva (es. data e studio per Inserisci), letti una sola volta.
+let pendingParams = null;
+function go(route, params = null) {
+  pendingParams = params;
+  if (location.hash === `#${route}`) renderView({ resetScroll: true });
+  else location.hash = `#${route}`;
+}
+function takeParams() {
+  const p = pendingParams;
+  pendingParams = null;
+  return p;
+}
+
+const ctx = {
+  store, sync, navigate, go, takeParams, install, prefs, applyTheme, path: [], query: new URLSearchParams(), entered: false,
+  rerender: () => rerender(),
 };
 
-function resolve(path, query) {
-  const r = resolveRoute(path, query);
-  return r.redirect ? r : { view: VIEWS[r.name], tab: r.tab, name: r.name };
-}
-
-// v7 (risposta 1): le Impostazioni ricordano la scheda da cui si è toccato ⚙︎ (indirizzo intero, es. il Calendario
-// di Movimenti): "‹ Conti" ci torna e quella scheda resta accesa. Aperte da un link diretto: Home, come la v6.
-const TAB_LABELS = { home: 'Home', movimenti: 'Movimenti', budget: 'Budget', statistiche: 'Statistiche', conti: 'Conti' };
-let lastTabRoot = null;
-let settingsFrom = null;
-function trackSettingsOrigin(r) {
-  if (r.name === 'impostazioni') {
-    if (!settingsFrom) settingsFrom = lastTabRoot || { tab: 'home', href: '#home' };
-    return;
+function updateChrome(route) {
+  const tab = TAB_OF[route] || route;
+  for (const a of navLinks) {
+    const active = a.dataset.route === tab;
+    a.classList.toggle('active', active);
+    if (active) a.setAttribute('aria-current', 'page');
+    else a.removeAttribute('aria-current');
   }
-  settingsFrom = null;
-  lastTabRoot = r.name in TAB_LABELS ? { tab: r.tab, href: location.hash || '#home' } : null;
+  const w = store.loadWarning;
+  loadWarningEl.textContent = w || '';
+  loadWarningEl.hidden = !w;
 }
 
-// Parametri passati in memoria da go(); restano validi finché non si cambia rotta.
-let params = {};
-let pendingParams = null;
-function go(route, p = {}) {
-  const target = '#' + route.replace(/^#/, '');
-  if (location.hash === target) { params = p; render(); } else { pendingParams = p; location.hash = target; }
-}
-
-// Aggiorna la query nell'indirizzo senza ridisegnare (filtri, giorno scelto…).
-function setQuery(q) {
-  const { path } = parseHash();
-  const s = new URLSearchParams(Object.entries(q).filter(([, v]) => v !== '' && v !== null && v !== undefined)).toString();
-  history.replaceState(null, '', '#' + path.join('/') + (s ? '?' + s : ''));
-  // Su una scheda, "‹ Scheda" dalle Impostazioni torna all'indirizzo aggiornato, senza query già consumate
-  // (es. ?budget=<id>, che altrimenti riaprirebbe il foglio).
-  if (lastTabRoot && !settingsFrom) lastTabRoot.href = location.hash || '#home';
-}
-
-// ---- Barra in alto ----
-// v7 (decisione v7 §1): le 5 schede (le viste senza "‹ Indietro") hanno in alto a destra sempre e solo ⚙︎,
-// creato qui così l'aspetto e la posizione sono identici ovunque; le loro azioni stanno nel contenuto.
-// Le pagine di dettaglio hanno "‹ Indietro" a sinistra e l'azione principale (Modifica, Nuovo) a destra.
-function setHeader(container, { title, back, actions = [], large = true }) {
-  clear($('topbar-left'));
-  clear($('topbar-right'));
-  $('topbar-title').textContent = title || '';
-  if (back) {
-    $('topbar-left').append(el('a', { class: 'topbar__btn', href: back.href, id: 'back-btn', attrs: { 'aria-label': 'Indietro: ' + (back.label || '') } }, icon('back', 22), el('span', { text: back.label || 'Indietro' })));
-    for (const a of actions) $('topbar-right').append(a);
-  } else {
-    $('topbar-right').append(el('a', { class: 'topbar__btn topbar__btn--circle', href: '#impostazioni', id: 'settings-btn', attrs: { 'aria-label': 'Impostazioni' } }, icon('gear')));
+/** Renderizza la vista corrente mantenendo focus, cursore e scroll. */
+function renderView({ resetScroll = false, entered = resetScroll } = {}) {
+  const { route, path, query } = parseHash();
+  ctx.path = path;
+  ctx.query = query;
+  ctx.entered = entered; // true entrando nella schermata o riaprendo l'app; false nei ridisegni
+  const active = document.activeElement;
+  let focusId = null;
+  let sel = null;
+  if (active && active.id && view.contains(active)) {
+    focusId = active.id;
+    if (active.tagName === 'INPUT' && active.type === 'text') sel = [active.selectionStart, active.selectionEnd];
   }
-  if (large && title) container.append(el('h1', { class: 'large-title', text: title }));
-  document.title = title ? `${title} · MoneyFlow` : 'MoneyFlow';
-}
-
-function updateCompact() {
-  topbar.classList.toggle('is-compact', window.scrollY > 24);
-}
-addEventListener('scroll', updateCompact, { passive: true });
-
-// Un ridisegno chiesto mentre se ne sta già facendo uno (es. eventi di blur) viene rimandato.
-let rendering = false;
-let again = false;
-function render() {
-  if (rendering) { again = true; return; }
-  rendering = true;
-  try { renderNow(); } finally { rendering = false; }
-  if (again) { again = false; queueMicrotask(rerender); }
-}
-
-function renderNow() {
-  const { path, query } = parseHash();
-  const r = resolve(path, query);
-  if (r.redirect) { location.replace('#' + r.redirect); return; }
-  trackSettingsOrigin(r);
-  const tab = r.name === 'impostazioni' ? settingsFrom.tab : r.tab;
-  for (const t of document.querySelectorAll('.tab')) {
-    if (t.dataset.tab === tab) t.setAttribute('aria-current', 'page'); else t.removeAttribute('aria-current');
-  }
-  clear(viewEl);
-  const ctx = {
-    store, prefs, sync, install, go, rerender, setQuery, applyTheme, path, query, params, tax: taxSettings,
-    today: () => todayISO(),
-    header: (opts) => setHeader(viewEl, opts),
-    settingsBack: settingsFrom ? { href: settingsFrom.href, label: TAB_LABELS[settingsFrom.tab] } : null,
-    getVersion,
-  };
+  const scrollY = window.scrollY;
+  updateChrome(route);
   try {
-    r.view.render(viewEl, ctx);
-  } catch (e) {
-    console.error(e);
-    viewEl.append(el('p', { class: 'form-error', text: 'Errore interno: ' + (e?.message || e) }));
+    routes[route].render(view, ctx);
+  } catch (err) {
+    console.error(err);
+    view.replaceChildren(el('p', { class: 'field-error card', text: `Errore nella visualizzazione: ${err.message}` }));
   }
-  updateCompact();
+  if (focusId) {
+    const target = document.getElementById(focusId);
+    if (target && view.contains(target)) {
+      target.focus({ preventScroll: true });
+      if (sel && target.tagName === 'INPUT' && target.type === 'text') {
+        try { target.setSelectionRange(sel[0], sel[1]); } catch { /* ignorato */ }
+      }
+    }
+  }
+  window.scrollTo(0, resetScroll ? 0 : scrollY);
+  watchLargeTitle();
+}
+
+// ---------- barra superiore compatta (titolo piccolo quando il titolo grande esce dallo schermo) ----------
+const topbar = document.getElementById('topbar');
+const topbarTitle = document.getElementById('topbar-title');
+let titleObserver = null;
+function watchLargeTitle() {
+  titleObserver?.disconnect();
+  const title = view.querySelector('.large-title');
+  topbarTitle.textContent = title ? title.textContent : '';
+  topbar.classList.remove('is-visible');
+  if (!title || !('IntersectionObserver' in window)) return;
+  titleObserver = new IntersectionObserver(([entry]) => {
+    topbar.classList.toggle('is-visible', !entry.isIntersecting && entry.boundingClientRect.top < 44);
+  }, { rootMargin: '-44px 0px 0px 0px' });
+  titleObserver.observe(title);
 }
 
 function rerender() {
-  preserveFocus(render);
+  if (!firstRenderDone) return;
+  renderView();
 }
 
-addEventListener('hashchange', () => {
-  params = pendingParams || {};
-  pendingParams = null;
-  render();
-  window.scrollTo(0, 0);
-  updateCompact();
-});
-
-store.subscribe(() => rerender());
-
-// ---- Interessi dei depositi (v4) ----
-// All'avvio, al ritorno in primo piano e dopo ogni modifica dello store (anche dalla sync).
-// Il flag evita il rientro; la passata successiva non trova differenze e non salva, quindi il ciclo termina.
-let reconciling = false;
-let reconcileQueued = false;
-function runReconcile() {
-  if (reconciling) return;
-  reconciling = true;
-  try { reconcileInterest(store, todayISO()); } catch (e) { console.warn('Interessi non aggiornati:', e?.message || e); } finally { reconciling = false; }
+// ---------- sincronizzazione: trigger ----------
+let syncTimer = null;
+function runSync() {
+  if (!sync.isEnabled() || !navigator.onLine) return;
+  sync.syncNow().then(() => { if (currentRoute() === 'altro') rerender(); });
 }
-store.subscribe(() => {
-  if (reconciling || reconcileQueued) return;
-  reconcileQueued = true;
-  queueMicrotask(() => { reconcileQueued = false; runReconcile(); });
-});
-sync.subscribe(() => { if (currentRoute()[0] === 'impostazioni') rerender(); });
 
-// Più schede aperte: se un'altra scheda salva, ricarica e ridisegna.
-addEventListener('storage', (e) => {
-  if (!e.key || !e.key.startsWith('moneyflow:')) return;
-  if (e.key === DATA_KEY || e.key === INVEST_KEY) store.reload();
-  else if (e.key === PREFS_KEY) { prefs.reload(); applyTheme(); rerender(); }
-  else if (e.key === SYNC_KEY) sync.reloadState();
-  else if (e.key === TAX_KEY) { taxSettings.reload(); rerender(); }
+store.subscribe(({ source }) => {
+  rerender();
+  if (source === 'local' && sync.isEnabled()) {
+    clearTimeout(syncTimer);
+    syncTimer = setTimeout(runSync, 3000);
+  }
 });
 
-// ---- Offline ----
-function updateOnline() { $('offline-pill').hidden = navigator.onLine; }
-addEventListener('online', updateOnline);
+addEventListener('hashchange', () => renderView({ resetScroll: true }));
+
+// Altri tab: ricarica i dati quando cambiano altrove.
+addEventListener('storage', (event) => {
+  if (event.key === 'dentalflow:data' || event.key === 'dentalflow:calendar') {
+    store.reloadFromStorage(); // emette {source:'remote'} → re-render
+    try {
+      sync.ensureTracking();
+    } catch (err) {
+      console.warn('ensureTracking', err);
+    }
+  } else if (event.key === 'dentalflow:sync') {
+    rerender();
+  } else if (event.key === 'dentalflow:prefs') {
+    applyTheme();
+    rerender();
+  }
+});
+
+// ---------- badge offline ----------
+const offlineBadge = document.getElementById('offline-badge');
+function updateOnline() {
+  offlineBadge.hidden = navigator.onLine;
+  // la pillola visibile è nella riga del titolo di ogni schermata (nessuno spostamento della pagina)
+  document.documentElement.classList.toggle('is-offline', !navigator.onLine);
+}
+addEventListener('online', () => { updateOnline(); runSync(); });
 addEventListener('offline', updateOnline);
-
-// ---- Service worker e banner "Aggiorna" (schema di PWA-BASE §7) ----
-let waiting = null;
-let updateRequested = false;
-let reloaded = false;
-const banner = $('update-banner');
-function showBanner(sw) {
-  waiting = sw;
-  banner.hidden = false;
-}
-$('update-btn').addEventListener('click', () => {
-  if (waiting) { updateRequested = true; waiting.postMessage({ type: 'SKIP_WAITING' }); } else location.reload();
-});
-
-async function registerSW() {
-  if (!('serviceWorker' in navigator)) return;
-  let controller = navigator.serviceWorker.controller;
-  const reg = await navigator.serviceWorker.register('./sw.js', { scope: './' });
-  const showIfWaiting = () => { if (reg.waiting && navigator.serviceWorker.controller) showBanner(reg.waiting); };
-  showIfWaiting();
-  reg.addEventListener('updatefound', () => {
-    const sw = reg.installing;
-    sw?.addEventListener('statechange', () => { if (sw.state === 'installed') showIfWaiting(); });
-  });
-  navigator.serviceWorker.addEventListener('controllerchange', () => {
-    const prev = controller;
-    controller = navigator.serviceWorker.controller;
-    if (!prev || reloaded) return; // primo claim dopo l'installazione: ignorare
-    if (updateRequested) { reloaded = true; location.reload(); } else showBanner(null); // aggiornato da un'altra scheda
-  });
-  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') reg.update().catch(() => {}); });
-}
-
-function getVersion() {
-  return new Promise((resolve) => {
-    const c = navigator.serviceWorker?.controller;
-    if (!c) { resolve(null); return; }
-    const ch = new MessageChannel();
-    const t = setTimeout(() => resolve(null), 1500);
-    ch.port1.onmessage = (e) => { clearTimeout(t); resolve(e.data?.version || null); };
-    c.postMessage({ type: 'GET_VERSION' }, [ch.port2]);
-  });
-}
-
-document.addEventListener('visibilitychange', () => {
-  if (document.visibilityState === 'visible') { runReconcile(); sync.onVisible(); rerender(); }
-});
-
-// ---- Avvio ----
-for (const span of document.querySelectorAll('.tab__icon')) span.append(icon(span.dataset.icon, 24));
-$('fab').append(icon('plus', 30));
-// Nel Calendario di Movimenti il + apre il foglio sul giorno scelto; altrove su oggi.
-const inCalendar = () => { const { path, query } = parseHash(); return path[0] === 'movimenti' && query.vista === 'calendario'; };
-$('fab').addEventListener('click', () => openQuickAdd({ store, prefs, go, tax: taxSettings, today: () => todayISO() },
-  { date: inCalendar() ? calendario.selectedDay() || undefined : undefined }));
-applyTheme();
 updateOnline();
-if (!location.hash) history.replaceState(null, '', '#home');
-runReconcile();
-render();
-sync.start();
-registerSW().catch((e) => console.warn('Service worker non registrato:', e?.message || e));
+
+// App tornata in primo piano (es. riaperta il giorno dopo): la vista la tratta come un ingresso.
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible' && firstRenderDone) renderView({ entered: true });
+});
+
+// ---------- primo render ----------
+renderView({ entered: true });
+firstRenderDone = true;
+try {
+  sync.ensureTracking();
+} catch (err) {
+  console.warn('ensureTracking', err);
+}
+runSync();
+
+// ---------- service worker e aggiornamenti ----------
+const updateBanner = document.getElementById('update-banner');
+const updateBtn = document.getElementById('update-btn');
+
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', async () => {
+    let controller = navigator.serviceWorker.controller; // controller precedente, aggiornato a ogni cambio
+    let updateRequested = false;
+    let reloaded = false;
+    let waitingWorker = null;
+
+    const showUpdateBanner = (worker) => {
+      waitingWorker = worker;
+      updateBanner.hidden = false;
+    };
+    updateBtn.addEventListener('click', () => {
+      if (waitingWorker) {
+        updateRequested = true;
+        updateBtn.disabled = true;
+        waitingWorker.postMessage({ type: 'SKIP_WAITING' });
+      } else {
+        location.reload();
+      }
+    });
+
+    let reg;
+    try {
+      reg = await navigator.serviceWorker.register('./sw.js', { scope: './' });
+    } catch (err) {
+      console.warn('Registrazione del service worker non riuscita', err);
+      return;
+    }
+    const showIfWaiting = () => { if (reg.waiting && navigator.serviceWorker.controller) showUpdateBanner(reg.waiting); };
+    showIfWaiting();
+    reg.addEventListener('updatefound', () => {
+      const sw = reg.installing;
+      sw?.addEventListener('statechange', () => { if (sw.state === 'installed') showIfWaiting(); });
+    });
+    navigator.serviceWorker.addEventListener('controllerchange', () => {
+      const prev = controller;
+      controller = navigator.serviceWorker.controller;
+      if (!prev || reloaded) return; // primo claim dopo l'installazione: niente reload, niente banner
+      if (updateRequested) {
+        reloaded = true;
+        location.reload();
+      } else {
+        showUpdateBanner(null); // un altro tab ha attivato l'aggiornamento: offri il reload
+      }
+    });
+    const check = () => reg.update().catch(() => {});
+    check();
+    document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') check(); });
+  });
+}

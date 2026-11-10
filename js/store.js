@@ -1,985 +1,1232 @@
-// Modello dati di MoneyFlow: validazione, CRUD con tombstone, persistenza sicura.
-// Ogni modifica valida, prepara una copia, salva e solo alla fine notifica.
+// Modello dati, validazione, CRUD e persistenza su localStorage (adapter iniettabile).
+// 'dentalflow:data' resta identico alla versione 1 (studi, trattamenti, inserimenti, tracking).
+// Calendario, note delle giornate e incassi stanno in 'dentalflow:calendar': una versione vecchia
+// dell'app li ignora e, salvando, non li cancella.
+import { isValidISODate } from './dates.js';
+import { ruleError, dayError, occurrences } from './calendar.js';
+import { COLOR_KEYS, nextStudioColor } from './colors.js';
 
-import { ValidationError, StorageError } from './errors.js';
-import { isValidISO, monthOf } from './dates.js';
-import { formatEuro, formatQty, QTY_UNIT } from './money.js';
-import { PICK_ICONS } from './icons.js';
-
-export { ValidationError, StorageError };
-
-export const APP = 'MoneyFlow';
-export const SCHEMA_VERSION = 1;
-export const DATA_KEY = 'moneyflow:data';
-// ETF (v5): chiave nuova e separata, così una scheda ancora in v4 che salva `moneyflow:data` non li cancella.
-export const INVEST_KEY = 'moneyflow:investments';
-
-export const PALETTE = [
-  '#0F9D58', '#2563EB', '#D97706', '#DC2626', '#7C3AED', '#DB2777',
-  '#0891B2', '#65A30D', '#EA580C', '#4F46E5', '#B45309', '#64748B',
-];
-
-// Raccolte del modello e prefisso usato nelle chiavi (sync, notifiche ai listener).
-export const KINDS = {
-  account: 'accounts',
-  category: 'categories',
-  movement: 'movements',
-  scheduled: 'scheduled',
-  goal: 'goals',
-  investment: 'investments',
-};
-
-// Raccolte salvate in `moneyflow:data` (quelle della v1–v4); `investments` sta in INVEST_KEY.
-export const DATA_COLLECTIONS = ['accounts', 'categories', 'movements', 'scheduled', 'goals'];
-
-export const MOVEMENT_TYPES = ['uscita', 'entrata', 'trasferimento', 'restituzione', 'variazione'];
-export const SCHEDULED_TYPES = ['uscita', 'entrata', 'trasferimento'];
-export const FREQS = ['once', 'weekly', 'monthly', 'months', 'yearly'];
-
-const DEFAULT_CATEGORIES = [
-  ['uscita', 'Casa', 0], ['uscita', 'Spesa', 7], ['uscita', 'Trasporti', 1], ['uscita', 'Bollette', 2],
-  ['uscita', 'Abbonamenti', 4], ['uscita', 'Salute', 3], ['uscita', 'Svago', 5], ['uscita', 'Ristoranti', 8],
-  ['uscita', 'Regali', 6], ['uscita', 'Altro', 11],
-  ['entrata', 'Stipendio', 0], ['entrata', 'Rimborsi', 6], ['entrata', 'Altro', 11],
-  ['entrata', 'Interessi', 0], ['entrata', 'Dividendi', 9],
-];
-
-// Categoria delle entrate "Interessi" dei conti deposito (v4): id fisso, creata da upsertDerived se manca.
-export const INTEREST_CATEGORY_ID = 'default-entrata-interessi';
-// Categoria "Dividendi" degli ETF (v5, provvisoria): id fisso, creata dal foglio Dividendo se manca (dati v1–v4).
-export const DIVIDEND_CATEGORY_ID = 'default-entrata-dividendi';
-const DEFAULT_ROLES = { Stipendio: 'stipendio', Interessi: 'interessi', Dividendi: 'dividendi' };
-// Categorie con ruolo create dall'app quando servono: nome alternativo se il nome è già usato.
-const ROLE_CATEGORIES = {
-  interessi: { id: INTEREST_CATEGORY_ID, name: 'Interessi', alt: 'Interessi deposito', color: PALETTE[0], order: 13 },
-  dividendi: { id: DIVIDEND_CATEGORY_ID, name: 'Dividendi', alt: 'Dividendi ETF', color: PALETTE[9], order: 14 },
-};
-export const TAX_REGIMES = ['amministrato', 'dichiarativo'];
-export const DEFAULT_TAX_RATE_BP = 2600;
-
-export function emptyData() {
-  return { app: APP, schemaVersion: SCHEMA_VERSION, accounts: [], categories: [], movements: [], scheduled: [], goals: [] };
+export class ValidationError extends Error {
+  constructor(message) {
+    super(message);
+    this.name = 'ValidationError';
+  }
 }
 
-// Le categorie iniziali hanno id fissi e date a 0: su ogni dispositivo sono lo stesso record,
-// quindi la sync non le raddoppia e qualsiasi modifica vera (updatedAt > 0) vince su quelle mai toccate.
-export function defaultData() {
-  const data = emptyData();
-  DEFAULT_CATEGORIES.forEach(([type, name, color], i) => {
-    data.categories.push({
-      id: `default-${type}-${name.toLocaleLowerCase('it')}`, createdAt: 0, updatedAt: 0, deleted: false,
-      name, type, color: PALETTE[color], budget: null,
-      role: (type === 'entrata' && DEFAULT_ROLES[name]) || null, order: i,
-    });
-  });
-  return data;
+export class StorageError extends Error {
+  constructor(message) {
+    super(message);
+    this.name = 'StorageError';
+  }
 }
 
-const fail = (msg, field) => { throw new ValidationError(msg, field); };
+export const DATA_KEY = 'dentalflow:data';
+export const CORRUPT_PREFIX = 'dentalflow:data:corrupt-';
+export const CAL_KEY = 'dentalflow:calendar';
+export const CAL_CORRUPT_PREFIX = 'dentalflow:calendar:corrupt-';
+export const MAX_CENTS = 10000000;
+export const MAX_NOTE = 1000;
+export const KINDS = ['studio', 'treatment', 'entry', 'rule', 'day', 'note', 'payment', 'setting', 'memo'];
+// memo: note libere "da ricordare" (Altro → Note), non legate a giorni o studi
+export const MAX_MEMO = 4000;
+// setting: impostazioni dell'account {id, value} (es. id 'tax' = parametri delle tasse); si sincronizzano
+const CAL_ARRAYS = ['rules', 'days', 'notes', 'payments', 'settings', 'memos'];
+export const SETTING_IDS = ['tax'];
+
+export const MSG = {
+  name: 'Il nome deve avere da 1 a 60 caratteri',
+  dupStudio: 'Esiste già uno studio con questo nome',
+  dupTreatment: 'Esiste già un trattamento con questo nome',
+  noStudios: 'Seleziona almeno uno studio',
+  date: 'Data non valida',
+  patients: 'Numero pazienti non valido (1–999)',
+  amount: 'Importo non valido (massimo 100.000,00 €)',
+  studioUnavailable: 'Lo studio non è disponibile per nuovi inserimenti',
+  treatmentInactive: 'Il trattamento non è attivo in questo studio',
+  studioNotFound: 'Studio non trovato',
+  treatmentNotFound: 'Trattamento non trovato',
+  notAssociated: 'Il trattamento non è associato a questo studio',
+  entryNotFound: 'Inserimento non trovato: potrebbe essere stato eliminato',
+  noEntries: 'Inserisci almeno un paziente',
+  quota: 'Impossibile salvare: spazio del browser esaurito o non disponibile. Esporta un backup.',
+  corrupt: 'Dati locali illeggibili: è stata salvata una copia. Importa un backup.',
+  readOnly: 'Dati locali illeggibili e impossibili da copiare: esporta o importa un backup prima di continuare',
+  calCorrupt: 'Calendario locale illeggibile: è stata salvata una copia. Importa un backup.',
+  color: 'Colore non valido',
+  note: `La nota può avere al massimo ${MAX_NOTE} caratteri`,
+  memo: `Scrivi la nota (al massimo ${MAX_MEMO} caratteri)`,
+  memoNotFound: 'Nota non trovata: potrebbe essere stata eliminata',
+  month: 'Mese non valido',
+  ruleNotFound: 'Regola del calendario non trovata',
+  dayNotFound: 'Giorno del calendario non trovato',
+  dayDuplicate: 'In quella data lo studio ha già un giorno singolo nel calendario',
+  noDay: 'Nessun inserimento in questa giornata',
+  notAssociatedTarget: (name) => `Il trattamento «${name}» non è associato allo studio scelto`,
+};
+
+const ARRAY_OF = {
+  studio: 'studios', treatment: 'treatments', entry: 'entries', rule: 'rules', day: 'days', note: 'notes', payment: 'payments', setting: 'settings', memo: 'memos',
+};
+const MONTH_RE = /^\d{4}-(0[1-9]|1[0-2])$/;
+export const noteId = (date, studioId) => `${date}_${studioId}`;
+export const paymentId = (month, studioId) => `${month}_${studioId}`;
+
 const isObj = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
-const lower = (s) => String(s).trim().toLocaleLowerCase('it');
+const isTs = (v) => Number.isSafeInteger(v) && v >= 0;
+const byName = (a, b) => a.name.localeCompare(b.name, 'it') || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
 
-function cleanName(v, field = 'name') {
-  const s = typeof v === 'string' ? v.trim() : '';
-  if (s.length < 1) fail('Inserisci un nome', field);
-  if (s.length > 60) fail('Il nome può avere al massimo 60 caratteri', field);
-  return s;
-}
-
-function cleanText(v, max, field, label) {
-  if (v === undefined || v === null) return '';
-  if (typeof v !== 'string') fail(`${label} non valida`, field);
-  const s = v.trim();
-  if (s.length > max) fail(`${label}: al massimo ${max} caratteri`, field);
-  return s;
-}
-
-function cleanColor(v) {
-  if (typeof v === 'string' && /^#[0-9a-f]{6}$/i.test(v)) return v.toUpperCase();
-  fail('Colore non valido', 'color');
-}
-
-function cleanInt(v, field, { min = -Infinity, nonZero = false, label = 'Importo' } = {}) {
-  if (!Number.isSafeInteger(v)) fail(`${label} non valido`, field);
-  if (v < min) fail(min > 0 ? `${label}: deve essere maggiore di zero` : `${label} non valido`, field);
-  if (nonZero && v === 0) fail(`${label}: non può essere zero`, field);
-  return v;
-}
-
-function cleanDate(v, field, label = 'Data') {
-  if (!isValidISO(v)) fail(`${label} non valida`, field);
-  return v;
-}
-
-function uniqueName(list, rec, sameGroup = () => true) {
-  const n = lower(rec.name);
-  if (list.some((x) => !x.deleted && x.id !== rec.id && sameGroup(x) && lower(x.name) === n)) {
-    fail('Esiste già un elemento con questo nome', 'name');
-  }
-}
-
-// Riferimento a un conto o categoria: se cambia, deve puntare a un elemento esistente e non eliminato.
-function checkRef(list, id, prevId, field, label) {
-  if (typeof id !== 'string' || !id) fail(`Scegli ${label}`, field);
-  const found = list.find((x) => x.id === id);
-  if (id === prevId) return found || null;
-  if (!found || found.deleted) fail(`Scegli ${label}`, field);
-  return found;
-}
-
-// Busta paga (v2, campi facoltativi sull'entrata): ogni valore in centesimi ≥ 0 oppure null.
-// Il lordo della v1 (`gross`) resta dov'è e vale come "Competenze lorde (Totale competenze)".
-export const PAYSLIP_FIELDS = {
-  contributions: 'Contributi',
-  taxable: 'Imponibile fiscale',
-  irpef: 'IRPEF trattenuta',
-  pension: 'Contributi fondo pensione',
-  deductions: 'Detrazioni',
-};
-
-function cleanPayslip(input) {
-  if (!isObj(input)) return null;
-  const out = {};
-  let any = false;
-  for (const [k, label] of Object.entries(PAYSLIP_FIELDS)) {
-    const v = input[k];
-    if (v === null || v === undefined) { out[k] = null; continue; }
-    out[k] = cleanInt(v, 'ps-' + k, { min: 0, label });
-    any = true;
-  }
-  return any ? out : null;
-}
-
-// Accantonamenti per mese degli obiettivi: { 'YYYY-MM': centesimi con segno }.
-function cleanGoalLog(v) {
-  const out = {};
-  if (!isObj(v)) return out;
-  for (const [k, n] of Object.entries(v)) {
-    if (/^\d{4}-\d{2}$/.test(k) && Number.isSafeInteger(n)) out[k] = n;
-  }
-  return out;
-}
-
-// Icona scelta per conti e categorie (v4): un nome di PICK_ICONS; un nome sconosciuto diventa null.
-const cleanIcon = (v) => (typeof v === 'string' && PICK_ICONS.includes(v) ? v : null);
-
-// Conto deposito senza vincoli (v4): data di inizio, ritenuta e tassi annui lordi per data, in punti base.
-function cleanDeposit(v, kind) {
-  if (v === null || v === undefined) return null;
-  if (kind !== 'eur') fail('Il deposito vale solo per i conti in euro', 'deposit');
-  if (!isObj(v)) fail('Deposito non valido', 'deposit');
-  const start = cleanDate(v.start, 'deposit-start', 'Data di inizio');
-  const wb = v.withholdingBp ?? 2600;
-  if (!Number.isSafeInteger(wb) || wb < 0 || wb > 10000) fail('Ritenuta: da 0 a 100 %', 'deposit-withholding');
-  if (!Array.isArray(v.rates) || !v.rates.length) fail('Inserisci il tasso annuo', 'deposit-rate');
-  const rates = v.rates.map((r) => {
-    if (!isObj(r)) fail('Tasso non valido', 'deposit-rate');
-    const from = cleanDate(r.from, 'deposit-rate', 'Data del tasso');
-    if (!Number.isSafeInteger(r.rateBp) || r.rateBp < 1 || r.rateBp > 2000) fail('Tasso annuo: da 0,01 a 20 %', 'deposit-rate');
-    return { from, rateBp: r.rateBp };
-  }).sort((a, b) => a.from.localeCompare(b.from));
-  if (rates[0].from !== start) fail('Il primo tasso deve partire dalla data di inizio', 'deposit-rate');
-  if (rates.some((r, i) => i > 0 && r.from === rates[i - 1].from)) fail('Due tassi con la stessa data', 'deposit-rate');
-  return { start, withholdingBp: wb, rates };
-}
-
-// Nome di una persona (spesa divisa, restituzione): 1–40 caratteri.
-function cleanPerson(v, field) {
-  const p = typeof v === 'string' ? v.trim().replace(/\s+/g, ' ') : '';
-  if (p.length < 1) fail('Inserisci il nome', field);
-  if (p.length > 40) fail('Il nome può avere al massimo 40 caratteri', field);
-  return p;
-}
-
-// Spesa divisa tra più persone (v4): [{ person, amount }], al massimo 20, nomi unici senza maiuscole. null se vuota.
-function cleanSplit(v) {
-  if (v === null || v === undefined) return null;
-  if (!Array.isArray(v)) fail('Persone non valide', 'split');
-  if (!v.length) return null;
-  if (v.length > 20) fail('Al massimo 20 persone', 'split');
-  const seen = new Set();
-  return v.map((it, i) => {
-    if (!isObj(it)) fail('Persone non valide', 'split');
-    const person = cleanPerson(it.person, 'split-' + i);
-    const k = lower(person);
-    if (seen.has(k)) fail(`${person} compare due volte`, 'split-' + i);
-    seen.add(k);
-    return { person, amount: cleanInt(it.amount, 'split-' + i, { min: 1, label: 'Quota' }) };
-  });
-}
-
-const unitOf = (acc) => (acc ? (acc.kind === 'crypto' ? 'crypto:' + acc.asset : 'eur') : null);
-
-// Totale restituito per una spesa, escludendo eventualmente una restituzione.
-function refundedTotal(state, expenseId, exceptId) {
-  let t = 0;
-  for (const m of state.movements) {
-    if (!m.deleted && m.type === 'restituzione' && m.refundOf === expenseId && m.id !== exceptId) t += m.amount;
-  }
-  return t;
-}
-
-// Restituito da una persona (nome senza maiuscole; null = restituzioni senza nome).
-function refundedBy(state, expenseId, person, exceptId) {
-  const k = person === null ? null : lower(person);
-  let t = 0;
-  for (const m of state.movements) {
-    if (m.deleted || m.type !== 'restituzione' || m.refundOf !== expenseId || m.id === exceptId) continue;
-    const mk = m.person ? lower(m.person) : null;
-    if (mk === k) t += m.amount;
-  }
-  return t;
-}
-
-const splitSum = (split) => (split || []).reduce((t, x) => t + x.amount, 0);
-
-// ---- ETF (v5) ----
-// Valori di 1 quota scritti a mano ("Aggiorna valore"): [{ date, price }] con price in unità da 1e-4 €,
-// ordinati per data, una sola voce per data (l'ultima scritta vince).
-function cleanPrices(v) {
-  if (v === null || v === undefined) return [];
-  if (!Array.isArray(v)) fail('Valori non validi', 'price');
-  const byDate = new Map();
-  for (const p of v) {
-    if (!isObj(p)) fail('Valore non valido (es. 58,50)', 'price');
-    const date = cleanDate(p.date, 'date');
-    byDate.set(date, { date, price: cleanInt(p.price, 'price', { min: 1, label: 'Valore' }) });
-  }
-  return [...byDate.values()].sort((a, b) => a.date.localeCompare(b.date));
-}
-
-const cleanRegime = (v) => (v === 'dichiarativo' ? 'dichiarativo' : 'amministrato');
-
-// Compra/Vendi dello stesso ETF nell'ordine in cui contano: data, poi momento di creazione.
-const etfOpOrder = (a, b) => a.date.localeCompare(b.date) || (a.createdAt ?? Infinity) - (b.createdAt ?? Infinity);
-const etfDelta = (m) => (m.trade === 'compra' ? m.amountTo : m.trade === 'vendi' ? -m.amount : 0);
-
-// Risposta 7 dell'utente: una vendita non può superare le quote possedute a quella data, né far scendere
-// sotto zero le quote in una data successiva (vendita retrodatata). N = il minimo delle quote possedute
-// dalla posizione della vendita in poi, calcolato senza la vendita stessa.
-function checkEtfSale(state, rec, prev) {
-  const ops = state.movements
-    .filter((m) => !m.deleted && m.etfId === rec.etfId && m.type === 'trasferimento' && m.id !== prev?.id && (m.trade === 'compra' || m.trade === 'vendi'))
-    .map((m) => ({ date: m.date, createdAt: m.createdAt, delta: etfDelta(m), self: false }));
-  ops.push({ date: rec.date, createdAt: prev ? prev.createdAt : Infinity, delta: 0, self: true });
-  ops.sort(etfOpOrder);
-  let qty = 0;
-  let available = null;
-  for (const op of ops) {
-    qty += op.delta;
-    if (op.self) available = qty;
-    else if (available !== null) available = Math.min(available, qty);
-  }
-  if (rec.amount > available) {
-    const n = Math.max(0, available);
-    fail(`Puoi vendere al massimo ${formatQty(n)} ${n === QTY_UNIT ? 'quota' : 'quote'}`, 'amount');
-  }
-}
-
-// Movimenti collegati a un ETF (`etfId`): Compra/Vendi (trasferimento con `trade`) e dividendo (entrata).
-// Compra: dal conto in euro (accountId) all'ETF (toAccountId = etfId), amount = euro pagati, amountTo = quote.
-// Vendi: dall'ETF (accountId = etfId) al conto in euro, amount = quote, amountTo = euro arrivati sul conto
-// (al netto della tassa trattenuta in regime Amministrato), tax = tassa (trattenuta o da pagare).
-// price = prezzo di 1 quota in unità da 1e-4 €. Un telefono in v4 vede il saldo in euro giusto e ignora l'ETF.
-function etfMovement(input, prev, state, rec) {
-  const etf = (state.investments || []).find((x) => x.id === input.etfId);
-  if (!etf || (etf.deleted && input.etfId !== prev?.etfId)) fail('Scegli un ETF', 'etfId');
-  rec.etfId = input.etfId;
-  rec.taxRegime = cleanRegime(input.taxRegime);
-  const eurRef = (id, prevId, field) => {
-    const a = checkRef(state.accounts, id, prevId, field, 'un conto in euro');
-    if (a && a.kind !== 'eur') fail('Scegli un conto in euro', field);
-    return id;
+function emptyState() {
+  return {
+    schemaVersion: 1, studios: [], treatments: [], entries: [], tracking: { enabled: false, dirty: [] },
+    rules: [], days: [], notes: [], payments: [], settings: [], memos: [],
   };
-  if (rec.type === 'trasferimento') {
-    if (input.trade !== 'compra' && input.trade !== 'vendi') fail('Operazione non valida', 'trade');
-    rec.trade = input.trade;
-    rec.price = cleanInt(input.price, 'price', { min: 1, label: 'Prezzo' });
-    if (rec.trade === 'compra') {
-      rec.accountId = eurRef(input.accountId, prev?.accountId, 'accountId');
-      if (input.toAccountId !== rec.etfId) fail('Compra: dal conto in euro all\'ETF', 'toAccountId');
-      rec.toAccountId = rec.etfId;
-      rec.amountTo = cleanInt(input.amountTo, 'amountTo', { min: 1, label: 'Quote' });
-      rec.tax = null;
-    } else {
-      if (input.accountId !== rec.etfId) fail('Vendi: dall\'ETF al conto in euro', 'accountId');
-      rec.accountId = rec.etfId;
-      rec.toAccountId = eurRef(input.toAccountId, prev?.toAccountId, 'toAccountId');
-      rec.amountTo = cleanInt(input.amountTo ?? 0, 'amountTo', { min: 0, label: 'Importo' });
-      rec.tax = cleanInt(input.tax ?? 0, 'tax', { min: 0, label: 'Tasse' });
-      checkEtfSale(state, rec, prev);
-    }
-    return rec;
-  }
-  if (rec.type === 'entrata') {
-    rec.accountId = eurRef(input.accountId, prev?.accountId, 'accountId');
-    const cat = checkRef(state.categories, input.categoryId, prev?.categoryId, 'categoryId', 'una categoria');
-    if (cat && cat.type !== 'entrata') fail('Scegli una categoria di entrata', 'categoryId');
-    rec.categoryId = input.categoryId;
-    rec.tax = input.tax === null || input.tax === undefined ? null : cleanInt(input.tax, 'tax', { min: 0, label: 'Tasse' });
-    return rec;
-  }
-  return fail('Movimento ETF non valido', 'type');
 }
 
-const VALIDATORS = {
-  account(input, prev, state) {
-    const kind = input.kind === 'crypto' ? 'crypto' : input.kind === 'eur' ? 'eur' : fail('Scegli il tipo di conto', 'kind');
-    const rec = {
-      name: cleanName(input.name),
-      kind,
-      asset: null,
-      initial: cleanInt(input.initial ?? 0, 'initial', { label: 'Saldo iniziale' }),
-      color: cleanColor(input.color),
-      order: Number.isSafeInteger(input.order) ? input.order : 0,
-      icon: cleanIcon(input.icon),
-      deposit: cleanDeposit(input.deposit, kind),
-      // v6 (facoltativo, assente nei dati v1–v5): valori di 1 unità crypto scritti a mano ("Aggiorna valore"),
-      // [{ date, price }] con price in centesimi per 1 unità intera; null per i conti in euro.
-      prices: kind === 'crypto' ? cleanPrices(input.prices) : null,
-    };
-    if (kind === 'crypto') {
-      const a = typeof input.asset === 'string' ? input.asset.trim().toUpperCase() : '';
-      if (!/^[A-Z0-9]{1,10}$/.test(a)) fail('Simbolo crypto: da 1 a 10 lettere o cifre (es. BTC)', 'asset');
-      rec.asset = a;
-    }
-    if (prev && unitOf(prev) !== unitOf(rec)) {
-      const used = state.movements.some((m) => !m.deleted && (m.accountId === prev.id || m.toAccountId === prev.id));
-      if (used) fail('Il conto ha già dei movimenti: non puoi cambiare tipo o simbolo', 'kind');
-      // I valori scritti a mano sono di 1 unità del vecchio simbolo: con un simbolo nuovo non valgono più.
-      if (kind === 'crypto') rec.prices = [];
-    }
-    uniqueName(state.accounts, { ...rec, id: prev?.id });
-    return rec;
-  },
+const serializeData = (s) => JSON.stringify({
+  schemaVersion: 1, studios: s.studios, treatments: s.treatments, entries: s.entries, tracking: s.tracking,
+});
+const serializeCal = (s) => JSON.stringify({ version: 1, rules: s.rules, days: s.days, notes: s.notes, payments: s.payments, settings: s.settings, memos: s.memos });
 
-  category(input, prev, state) {
-    const type = prev ? prev.type : input.type;
-    if (type !== 'uscita' && type !== 'entrata') fail('Tipo di categoria non valido', 'type');
-    const rec = {
-      name: cleanName(input.name),
-      type,
-      color: cleanColor(input.color),
-      budget: null,
-      role: ['stipendio', 'interessi', 'dividendi'].includes(input.role) ? input.role : null,
-      order: Number.isSafeInteger(input.order) ? input.order : 0,
-      icon: cleanIcon(input.icon),
-    };
-    if (input.budget !== null && input.budget !== undefined) {
-      if (type !== 'uscita') fail('Il budget vale solo per le categorie di uscita', 'budget');
-      rec.budget = cleanInt(input.budget, 'budget', { min: 1, label: 'Budget' });
-    }
-    uniqueName(state.categories, { ...rec, id: prev?.id }, (x) => x.type === type);
-    return rec;
-  },
-
-  movement(input, prev, state) {
-    // In modifica uscita, entrata e trasferimento possono scambiarsi il tipo; restituzioni e variazioni restano del loro tipo.
-    let type = prev ? prev.type : input.type;
-    if (prev && input.type !== prev.type && SCHEDULED_TYPES.includes(prev.type) && SCHEDULED_TYPES.includes(input.type)) {
-      if (prev.type === 'uscita' && refundedTotal(state, prev.id) > 0) {
-        fail('Questa spesa ha restituzioni collegate: per cambiarne il tipo elimina prima le restituzioni', 'type');
-      }
-      type = input.type;
-    }
-    if (!MOVEMENT_TYPES.includes(type)) fail('Tipo di movimento non valido', 'type');
-    // Rettifica "Allinea al saldo reale" (v4): variazione su un conto deposito, scritta solo dal motore degli interessi.
-    const align = type === 'variazione' && isObj(input.align) && Number.isSafeInteger(input.align.balance) ? { balance: input.align.balance } : null;
-    const rec = {
-      type,
-      date: cleanDate(input.date, 'date'),
-      amount: type === 'variazione'
-        ? cleanInt(input.amount, 'amount', { nonZero: !align, label: 'Quantità' })
-        : cleanInt(input.amount, 'amount', { min: 1 }),
-      accountId: null, toAccountId: null, amountTo: null, categoryId: null,
-      description: cleanText(input.description, 80, 'description', 'Descrizione'),
-      note: cleanText(input.note, 500, 'note', 'Nota'),
-      excluded: 0, refundOf: null, gross: null,
-      trade: null, price: null, payslip: null,
-      scheduledId: typeof input.scheduledId === 'string' ? input.scheduledId : null,
-      occurrence: isValidISO(input.occurrence) ? input.occurrence : null,
-      split: null, person: null, interest: null, align: null, importKey: null,
-      etfId: null, tax: null, taxRegime: null,
-    };
-    if (typeof input.etfId === 'string' && input.etfId) return etfMovement(input, prev, state, rec);
-    const acc = checkRef(state.accounts, input.accountId, prev?.accountId, 'accountId', 'un conto');
-    rec.accountId = input.accountId;
-    if (acc && ['uscita', 'entrata', 'restituzione'].includes(type) && acc.kind !== 'eur') {
-      fail('Uscite, entrate e restituzioni si registrano solo su conti in euro', 'accountId');
-    }
-    if (acc && type === 'variazione' && acc.kind !== 'crypto' && !align) fail('La variazione di quantità vale solo per i conti crypto', 'accountId');
-    if (align && acc && acc.kind === 'eur') rec.align = align;
-    if ((type === 'uscita' || type === 'entrata') && input.importKey !== null && input.importKey !== undefined && input.importKey !== '') {
-      if (typeof input.importKey !== 'string' || input.importKey.length > 120) fail('Chiave di importazione non valida', 'importKey');
-      rec.importKey = input.importKey;
-    }
-    if (type === 'entrata' && isObj(input.interest) && typeof input.interest.accountId === 'string' && /^\d{4}-\d{2}$/.test(input.interest.month)) {
-      rec.interest = { accountId: input.interest.accountId, month: input.interest.month };
-    }
-
-    if (type === 'uscita' || type === 'entrata') {
-      const cat = checkRef(state.categories, input.categoryId, prev?.categoryId, 'categoryId', 'una categoria');
-      if (cat && cat.type !== type) fail('Scegli una categoria adatta al tipo di movimento', 'categoryId');
-      rec.categoryId = input.categoryId;
-    }
-    if (type === 'uscita') {
-      // Spesa divisa (v4): la quota esclusa è la somma delle quote delle persone.
-      rec.split = cleanSplit(input.split);
-      rec.excluded = rec.split ? splitSum(rec.split) : cleanInt(input.excluded ?? 0, 'excluded', { min: 0, label: 'Quota esclusa' });
-      if (rec.excluded > rec.amount) fail(rec.split ? "Le quote delle persone non possono superare l'importo" : "La quota esclusa non può superare l'importo", rec.split ? 'split' : 'excluded');
-      const refunded = prev ? refundedTotal(state, prev.id) : 0;
-      if (rec.split && prev) {
-        // Nessuna persona può scendere sotto quanto ha già restituito (anche chi viene tolto dall'elenco).
-        const names = new Map(rec.split.map((x, i) => [lower(x.person), i]));
-        for (const m of state.movements) {
-          if (m.deleted || m.type !== 'restituzione' || m.refundOf !== prev.id || !m.person) continue;
-          const i = names.get(lower(m.person));
-          const share = i === undefined ? 0 : rec.split[i].amount;
-          const by = refundedBy(state, prev.id, m.person);
-          if (by > share) fail(`${m.person} ha già restituito ${formatEuro(by)}: la sua quota non può essere minore`, i === undefined ? 'split' : 'split-' + i);
-        }
-      }
-      if (rec.excluded < refunded) fail(`Sono già stati restituiti ${formatEuro(refunded)}: la quota esclusa non può essere minore`, rec.split ? 'split' : 'excluded');
-    }
-    if (type === 'entrata' && input.gross !== null && input.gross !== undefined) {
-      rec.gross = cleanInt(input.gross, 'gross', { min: 1, label: 'Competenze lorde' });
-    }
-    if (type === 'entrata') rec.payslip = cleanPayslip(input.payslip);
-    if (type === 'trasferimento') {
-      const to = checkRef(state.accounts, input.toAccountId, prev?.toAccountId, 'toAccountId', 'il conto di arrivo');
-      if (input.toAccountId === input.accountId) fail('Scegli due conti diversi', 'toAccountId');
-      rec.toAccountId = input.toAccountId;
-      if (acc && to && unitOf(acc) !== unitOf(to)) {
-        rec.amountTo = cleanInt(input.amountTo, 'amountTo', { min: 1, label: 'Importo ricevuto' });
-      }
-      // Compra/Vendi (v2): un trasferimento euro↔crypto con il prezzo unitario (centesimi per 1 unità intera).
-      if (input.trade === 'compra' || input.trade === 'vendi') {
-        const buy = input.trade === 'compra';
-        const ok = acc && to && (buy ? acc.kind === 'eur' && to.kind === 'crypto' : acc.kind === 'crypto' && to.kind === 'eur');
-        if (!ok) fail(buy ? 'Compra: dal conto in euro al conto crypto' : 'Vendi: dal conto crypto al conto in euro', 'accountId');
-        rec.trade = input.trade;
-        rec.price = cleanInt(input.price, 'price', { min: 1, label: 'Prezzo' });
-      }
-    }
-    if (type === 'restituzione') {
-      const exp = state.movements.find((m) => m.id === input.refundOf);
-      if (!exp || exp.type !== 'uscita' || (exp.deleted && input.refundOf !== prev?.refundOf)) {
-        fail('La spesa collegata non esiste più', 'refundOf');
-      }
-      rec.refundOf = input.refundOf;
-      const named = typeof input.person === 'string' && input.person.trim() ? cleanPerson(input.person, 'person') : null;
-      const split = Array.isArray(exp.split) && exp.split.length ? exp.split : null;
-      if (named && split) {
-        const share = split.find((x) => lower(x.person) === lower(named));
-        if (!share) fail('Scegli una delle persone della spesa', 'person');
-        rec.person = share.person;
-      } else rec.person = named;
-      if (!exp.deleted) {
-        const residual = (exp.excluded || 0) - refundedTotal(state, exp.id, prev?.id);
-        if (rec.amount > residual) fail(`Puoi registrare al massimo ${formatEuro(residual)}`, 'amount');
-        if (split) {
-          // Residuo della persona scelta, oppure della parte senza nome (quota esclusa − somma delle quote).
-          const share = rec.person ? split.find((x) => lower(x.person) === lower(rec.person)).amount : Math.max(0, exp.excluded - splitSum(split));
-          const left = share - refundedBy(state, exp.id, rec.person, prev?.id);
-          if (rec.amount > left) fail(`${rec.person ? rec.person + ': puoi' : 'Puoi'} registrare al massimo ${formatEuro(Math.max(0, left))}`, 'amount');
-        }
-      }
-    }
-    return rec;
-  },
-
-  scheduled(input, prev, state) {
-    const type = input.type;
-    if (!SCHEDULED_TYPES.includes(type)) fail('Tipo non valido', 'type');
-    const rec = {
-      type,
-      amount: cleanInt(input.amount, 'amount', { min: 1 }),
-      accountId: input.accountId, toAccountId: null, amountTo: null, categoryId: null,
-      description: cleanText(input.description, 80, 'description', 'Descrizione'),
-      start: cleanDate(input.start, 'start', 'Data di inizio'),
-      freq: FREQS.includes(input.freq) ? input.freq : fail('Scegli la frequenza', 'freq'),
-      interval: null,
-      end: null,
-      handled: isObj(input.handled) ? { ...input.handled } : (prev?.handled ? { ...prev.handled } : {}),
-    };
-    const acc = checkRef(state.accounts, input.accountId, prev?.accountId, 'accountId', 'un conto');
-    if (acc && type !== 'trasferimento' && acc.kind !== 'eur') fail('Uscite ed entrate si programmano solo su conti in euro', 'accountId');
-    if (type !== 'trasferimento') {
-      const cat = checkRef(state.categories, input.categoryId, prev?.categoryId, 'categoryId', 'una categoria');
-      if (cat && cat.type !== type) fail('Scegli una categoria adatta al tipo', 'categoryId');
-      rec.categoryId = input.categoryId;
-    } else {
-      const to = checkRef(state.accounts, input.toAccountId, prev?.toAccountId, 'toAccountId', 'il conto di arrivo');
-      if (input.toAccountId === input.accountId) fail('Scegli due conti diversi', 'toAccountId');
-      rec.toAccountId = input.toAccountId;
-      if (acc && to && unitOf(acc) !== unitOf(to)) rec.amountTo = cleanInt(input.amountTo, 'amountTo', { min: 1, label: 'Importo ricevuto' });
-    }
-    if (rec.freq === 'months') {
-      if (!Number.isSafeInteger(input.interval) || input.interval < 2 || input.interval > 24) fail('Ogni quanti mesi: da 2 a 24', 'interval');
-      rec.interval = input.interval;
-    }
-    if (input.end) {
-      rec.end = cleanDate(input.end, 'end', 'Data di fine');
-      if (rec.end < rec.start) fail("La data di fine è prima dell'inizio", 'end');
-    }
-    return rec;
-  },
-
-  goal(input, prev, state) {
-    const rec = {
-      name: cleanName(input.name),
-      target: cleanInt(input.target, 'target', { min: 1, label: 'Obiettivo' }),
-      saved: cleanInt(input.saved ?? 0, 'saved', { min: 0, label: 'Messo da parte' }),
-      deadline: input.deadline ? cleanDate(input.deadline, 'deadline', 'Scadenza') : null,
-      color: cleanColor(input.color),
-      monthly: input.monthly === null || input.monthly === undefined ? null : cleanInt(input.monthly, 'monthly', { min: 1, label: 'Quota mensile' }),
-      log: cleanGoalLog(input.log),
-    };
-    uniqueName(state.goals, { ...rec, id: prev?.id });
-    return rec;
-  },
-
-  // ETF (v5): nome, ISIN o sigla facoltativi, aliquota (punti base, predefinita 26 %), regime, valori scritti a mano.
-  investment(input, prev, state) {
-    const code = typeof input.code === 'string' ? input.code.trim().toUpperCase() : '';
-    if (code && !/^[A-Z0-9.-]{1,20}$/.test(code)) fail('Solo lettere, numeri, punto e trattino (massimo 20)', 'code');
-    const rate = input.taxRateBp ?? DEFAULT_TAX_RATE_BP;
-    if (!Number.isSafeInteger(rate) || rate < 0 || rate > 10000) fail("Scrivi un'aliquota tra 0 e 100 (es. 26)", 'taxRateBp');
-    const rec = {
-      name: cleanName(input.name),
-      code: code || null,
-      color: cleanColor(input.color),
-      order: Number.isSafeInteger(input.order) ? input.order : 0,
-      taxRateBp: rate,
-      taxRegime: cleanRegime(input.taxRegime),
-      prices: cleanPrices(input.prices),
-    };
-    const n = lower(rec.name);
-    if ((state.investments || []).some((x) => !x.deleted && x.id !== prev?.id && lower(x.name) === n)) fail('Esiste già un ETF con questo nome', 'name');
-    return rec;
-  },
-};
-
-const cloneState = (s) => ({ ...s, accounts: [...s.accounts], categories: [...s.categories], movements: [...s.movements], scheduled: [...s.scheduled], goals: [...s.goals], investments: [...(s.investments || [])] });
-
-const validRecords = (list) => list.filter((r) => isObj(r) && typeof r.id === 'string' && r.id);
-
-// Normalizza un dato letto (localStorage o backup) senza scartare campi sconosciuti.
-// `collections`: per `moneyflow:data` solo le 5 raccolte v1–v4; per un backup anche `investments` (v5).
-export function normalizeData(raw, collections = Object.values(KINDS)) {
-  if (!isObj(raw) || raw.app !== APP) return null;
-  const out = { ...raw };
-  for (const col of collections) {
-    const list = raw[col] === undefined ? [] : raw[col];
-    if (!Array.isArray(list)) return null;
-    out[col] = validRecords(list);
-  }
-  if (!Number.isSafeInteger(out.schemaVersion)) out.schemaVersion = SCHEMA_VERSION;
-  // Punto di migrazione: qui si convertiranno le versioni vecchie quando lo schema cambierà.
-  return out;
+function nameError(name) {
+  if (typeof name !== 'string') return MSG.name;
+  const n = name.trim();
+  return n.length < 1 || n.length > 60 ? MSG.name : null;
 }
 
-export function createStore({ storage, now = () => Date.now(), uuid = () => crypto.randomUUID(), key = DATA_KEY, investKey = INVEST_KEY } = {}) {
-  let state;
-  let corrupted = null;
-  // ETF letti da un `moneyflow:data` vecchio (backup v5 importato in una v4) e non ancora scritti nella chiave nuova.
-  let investPending = false;
-  const listeners = new Set();
+/**
+ * Regole per singolo record (tipi, data, intervalli, nome 1–60).
+ * Ritorna un messaggio italiano o null.
+ */
+export function validateRecord(kind, r) {
+  if (!isObj(r)) return 'Record non valido';
+  if (typeof r.id !== 'string' || r.id === '') return 'Identificativo non valido';
+  if (!isTs(r.createdAt) || !isTs(r.updatedAt)) return 'Data di modifica non valida';
+  if (r.deleted !== undefined && typeof r.deleted !== 'boolean') return 'Campo "deleted" non valido';
+  if (kind === 'studio') {
+    const e = nameError(r.name);
+    if (e) return e;
+    if (typeof r.archived !== 'boolean') return 'Campo "archiviato" non valido';
+    if (r.color !== undefined && !COLOR_KEYS.includes(r.color)) return MSG.color;
+    return null;
+  }
+  if (kind === 'treatment') {
+    const e = nameError(r.name);
+    if (e) return e;
+    if (!isObj(r.studios)) return 'Elenco studi del trattamento non valido';
+    for (const v of Object.values(r.studios)) {
+      if (v !== 'active' && v !== 'archived') return 'Stato del trattamento in uno studio non valido';
+    }
+    return null;
+  }
+  if (kind === 'entry') {
+    if (!isValidISODate(r.date)) return MSG.date;
+    if (typeof r.studioId !== 'string' || r.studioId === '') return 'Studio non valido';
+    if (typeof r.treatmentId !== 'string' || r.treatmentId === '') return 'Trattamento non valido';
+    if (!Number.isInteger(r.patients) || r.patients < 1 || r.patients > 999) return MSG.patients;
+    if (!Number.isInteger(r.amountCents) || r.amountCents < 0 || r.amountCents > MAX_CENTS) return MSG.amount;
+    return null;
+  }
+  if (kind === 'rule') return ruleError(r);
+  if (kind === 'day') return dayError(r);
+  if (kind === 'note') {
+    if (!isValidISODate(r.date)) return MSG.date;
+    if (typeof r.studioId !== 'string' || r.studioId === '') return 'Studio non valido';
+    if (typeof r.text !== 'string' || r.text.trim() === '' || r.text.length > MAX_NOTE) return MSG.note;
+    return null;
+  }
+  if (kind === 'payment') {
+    if (typeof r.month !== 'string' || !MONTH_RE.test(r.month)) return MSG.month;
+    if (typeof r.studioId !== 'string' || r.studioId === '') return 'Studio non valido';
+    if (typeof r.paid !== 'boolean') return 'Stato del pagamento non valido';
+    if (r.bollo !== undefined && typeof r.bollo !== 'boolean') return 'Marca da bollo non valida';
+    if (r.excludedCents !== undefined && (!Number.isInteger(r.excludedCents) || r.excludedCents < 0 || r.excludedCents > MAX_CENTS)) return MSG.amount;
+    return null;
+  }
+  if (kind === 'memo') {
+    if (typeof r.text !== 'string' || r.text.trim() === '' || r.text.length > MAX_MEMO) return MSG.memo;
+    return null;
+  }
+  if (kind === 'setting') {
+    if (!SETTING_IDS.includes(r.id)) return 'Impostazione sconosciuta';
+    if (!isObj(r.value)) return 'Valore dell\'impostazione non valido';
+    return null;
+  }
+  return 'Tipo di record sconosciuto';
+}
 
-  // `moneyflow:data` senza `investments`, come lo scrive la v4.
-  const dataOf = (s) => { const { investments, ...rest } = s; return rest; };
-  const investOf = (s) => ({ app: APP, schemaVersion: SCHEMA_VERSION, investments: s.investments || [] });
+function isValidState(s) {
+  return isObj(s) && s.schemaVersion === 1 && Array.isArray(s.studios) && Array.isArray(s.treatments)
+    && Array.isArray(s.entries);
+}
 
-  // Salva solo le chiavi toccate (`keys` della modifica; null = tutto). Se la seconda scrittura fallisce
-  // si rimette il valore precedente della prima: lo stato resta invariato e arriva StorageError.
-  function persist(next, keys = null) {
-    const inv = keys === null || investPending || keys.some((k) => k.startsWith('investment_'));
-    const data = keys === null || keys.some((k) => !k.startsWith('investment_'));
-    let before = null;
-    try {
-      if (data) {
-        if (inv) { try { before = storage.getItem(key); } catch { before = null; } }
-        storage.setItem(key, JSON.stringify(dataOf(next)));
-      }
-    } catch (e) {
-      throw new StorageError();
+function normalizeLoaded(s) {
+  const t = isObj(s.tracking) ? s.tracking : {};
+  return {
+    ...emptyState(),
+    schemaVersion: 1,
+    studios: s.studios,
+    treatments: s.treatments,
+    entries: s.entries,
+    tracking: {
+      enabled: t.enabled === true,
+      dirty: Array.isArray(t.dirty) ? t.dirty.filter((k) => typeof k === 'string') : [],
+    },
+  };
+}
+
+const keyOf = (kind, id) => `${kind}_${id}`;
+function splitKey(key) {
+  const i = key.indexOf('_');
+  return i < 0 ? [null, null] : [key.slice(0, i), key.slice(i + 1)];
+}
+
+export function createStore(deps) {
+  const { storage, now, uuid } = deps;
+  let state = emptyState();
+  let readOnly = false;
+  let loadWarning = null;
+  // Contenuto di 'dentalflow:calendar': calDisk = stringa su disco (null se assente), calSaved = ultimo stato salvato.
+  let calDisk = null;
+  let calSaved = serializeCal(emptyState());
+  const subscribers = new Set();
+
+  /** Copia un valore illeggibile sotto prefix+timestamp (una sola volta). false se non si può copiare. */
+  function keepCorruptCopy(prefix, raw) {
+    for (let i = 0; i < storage.length; i++) {
+      const k = storage.key(i);
+      if (k && k.startsWith(prefix) && storage.getItem(k) === raw) return true;
     }
     try {
-      if (inv) storage.setItem(investKey, JSON.stringify(investOf(next)));
-    } catch (e) {
-      if (data) {
-        try { if (before === null) storage.removeItem(key); else storage.setItem(key, before); } catch { /* resta il valore nuovo: si ricarica alla prossima apertura */ }
-      }
-      throw new StorageError();
+      storage.setItem(prefix + now(), raw);
+      return true;
+    } catch {
+      return false;
     }
-    if (inv) investPending = false;
   }
 
-  function loadInvestments(legacy) {
+  function loadData() {
     let raw = null;
-    try { raw = storage.getItem(investKey); } catch { raw = null; }
-    if (raw === null) {
-      if (Array.isArray(legacy)) { investPending = true; return validRecords(legacy); }
-      return [];
-    }
     try {
-      const o = JSON.parse(raw);
-      if (isObj(o) && o.app === APP && Array.isArray(o.investments)) return validRecords(o.investments);
-    } catch { /* sotto: copia grezza e ripartenza */ }
-    const ck = `${investKey}:corrupt-${now()}`;
-    try { storage.setItem(ck, raw); } catch { /* niente spazio: il valore resta sotto la chiave originale fino al prossimo salvataggio */ }
-    corrupted = ck;
-    return [];
-  }
-
-  function load() {
-    investPending = false;
-    let raw = null;
-    try { raw = storage.getItem(key); } catch { raw = null; }
-    if (raw === null) {
-      state = { ...defaultData(), investments: loadInvestments(null) };
-      try { storage.setItem(key, JSON.stringify(dataOf(state))); } catch { /* resta in memoria finché non c'è spazio */ }
+      raw = storage.getItem(DATA_KEY);
+    } catch {
+      raw = null;
+    }
+    if (raw === null || raw === undefined) {
+      state = emptyState();
       return;
     }
     let parsed = null;
-    try { parsed = normalizeData(JSON.parse(raw), DATA_COLLECTIONS); } catch { parsed = null; }
-    if (parsed) {
-      const legacy = parsed.investments;
-      delete parsed.investments;
-      state = { ...parsed, investments: loadInvestments(legacy) };
+    try {
+      parsed = JSON.parse(raw);
+    } catch {
+      parsed = null;
+    }
+    if (isValidState(parsed)) {
+      state = normalizeLoaded(parsed);
       return;
     }
-    const ck = `${key}:corrupt-${now()}`;
-    try { storage.setItem(ck, raw); } catch { /* niente spazio: il valore resta comunque sotto la chiave originale fino al prossimo salvataggio */ }
-    corrupted = ck;
-    state = { ...defaultData(), investments: loadInvestments(null) };
+    state = emptyState();
+    if (!keepCorruptCopy(CORRUPT_PREFIX, raw)) {
+      readOnly = true;
+      loadWarning = MSG.readOnly;
+      return;
+    }
+    loadWarning = MSG.corrupt;
   }
 
-  function notify(keys, source) {
-    for (const fn of [...listeners]) fn({ keys, source });
+  function loadCal() {
+    let raw = null;
+    try {
+      raw = storage.getItem(CAL_KEY);
+    } catch {
+      raw = null;
+    }
+    calDisk = raw ?? null;
+    if (raw === null || raw === undefined) {
+      calSaved = serializeCal(state);
+      return;
+    }
+    let parsed = null;
+    try {
+      parsed = JSON.parse(raw);
+    } catch {
+      parsed = null;
+    }
+    if (isObj(parsed) && CAL_ARRAYS.every((a) => parsed[a] === undefined || Array.isArray(parsed[a]))) {
+      for (const a of CAL_ARRAYS) state[a] = (parsed[a] || []).filter(isObj);
+      calSaved = serializeCal(state);
+      return;
+    }
+    calSaved = null; // al primo salvataggio il calendario viene riscritto (la copia è già salvata)
+    if (!keepCorruptCopy(CAL_CORRUPT_PREFIX, raw)) {
+      readOnly = true;
+      loadWarning = MSG.readOnly;
+      return;
+    }
+    if (!readOnly) loadWarning = loadWarning ? `${loadWarning} ${MSG.calCorrupt}` : MSG.calCorrupt;
   }
 
-  function commit(next, keys, source = 'local') {
-    persist(next, keys);
+  function load() {
+    readOnly = false;
+    loadWarning = null;
+    loadData();
+    loadCal();
+  }
+
+  function notify(source) {
+    for (const fn of [...subscribers]) {
+      try {
+        fn({ source });
+      } catch (err) {
+        console.error(err);
+      }
+    }
+  }
+
+  /** Salva next (rimuove i tombstone se il tracking è spento); solo dopo il salvataggio sostituisce lo stato. */
+  function commit(next, { emit = true, source = 'local', allowReadOnly = false } = {}) {
+    if (readOnly && !allowReadOnly) throw new StorageError(MSG.readOnly);
+    if (!next.tracking.enabled) {
+      for (const arr of Object.values(ARRAY_OF)) next[arr] = next[arr].filter((r) => !r.deleted);
+      next.tracking.dirty = [];
+    }
+    const calStr = serializeCal(next);
+    const calChanged = calStr !== calSaved;
+    if (calChanged) {
+      try {
+        storage.setItem(CAL_KEY, calStr);
+      } catch {
+        throw new StorageError(MSG.quota);
+      }
+    }
+    try {
+      storage.setItem(DATA_KEY, serializeData(next));
+    } catch {
+      if (calChanged) {
+        try {
+          if (calDisk === null) storage.removeItem(CAL_KEY);
+          else storage.setItem(CAL_KEY, calDisk);
+        } catch { /* il calendario resta quello nuovo: lo stato in memoria non cambia */ }
+      }
+      throw new StorageError(MSG.quota);
+    }
+    if (calChanged) {
+      calSaved = calStr;
+      calDisk = calStr;
+    }
     state = next;
-    notify(keys, source);
+    if (emit) notify(source);
   }
 
-  const stamp = (prev) => Math.max(now(), (prev?.updatedAt || 0) + 1);
-  const col = (kind) => KINDS[kind] || fail('Tipo sconosciuto');
-
-  function find(kind, id) {
-    return state[col(kind)].find((r) => r.id === id) || null;
+  function mutate(fn, opts) {
+    if (readOnly) throw new StorageError(MSG.readOnly);
+    const next = structuredClone(state);
+    const result = fn(next);
+    commit(next, opts);
+    return result;
   }
 
-  function add(kind, input) {
-    const clean = VALIDATORS[kind](input || {}, null, state);
+  function stamp(rec) {
+    rec.updatedAt = Math.max(now(), (rec.updatedAt || 0) + 1);
+  }
+
+  function markDirty(next, kind, id) {
+    if (!next.tracking.enabled) return;
+    const k = keyOf(kind, id);
+    if (!next.tracking.dirty.includes(k)) next.tracking.dirty.push(k);
+  }
+
+  function touch(next, kind, rec) {
+    stamp(rec);
+    markDirty(next, kind, rec.id);
+  }
+
+  function tombstone(next, kind, rec) {
+    rec.deleted = true;
+    touch(next, kind, rec);
+  }
+
+  const live = (arr) => arr.filter((r) => !r.deleted);
+  const findLive = (arr, id) => arr.find((r) => r.id === id && !r.deleted);
+
+  function cleanName(name) {
+    const e = nameError(typeof name === 'string' ? name : String(name ?? ''));
+    if (e) throw new ValidationError(e);
+    return String(name).trim();
+  }
+
+  function checkUnique(arr, name, excludeId, msg) {
+    const low = name.toLocaleLowerCase('it');
+    if (arr.some((r) => !r.deleted && r.id !== excludeId && r.name.toLocaleLowerCase('it') === low)) {
+      throw new ValidationError(msg);
+    }
+  }
+
+  function requireIds(ids) {
+    if (!Array.isArray(ids) || ids.length === 0) throw new ValidationError(MSG.noStudios);
+  }
+
+  function entryFieldsError(e) {
+    if (!isValidISODate(e.date)) return MSG.date;
+    if (!Number.isInteger(e.patients) || e.patients < 1 || e.patients > 999) return MSG.patients;
+    if (!Number.isInteger(e.amountCents) || e.amountCents < 0 || e.amountCents > MAX_CENTS) return MSG.amount;
+    return null;
+  }
+
+  const copyRec = (r) => structuredClone(r);
+  const pick = (o, keys) => Object.fromEntries(keys.filter((k) => o && o[k] !== undefined).map((k) => [k, o[k]]));
+
+  /** Crea o aggiorna (anche riportando in vita un record eliminato) un record con id deterministico. */
+  function upsert(next, kind, id, fields) {
+    const arr = next[ARRAY_OF[kind]];
+    const rec = arr.find((r) => r.id === id);
+    if (rec) {
+      const same = !rec.deleted && Object.entries(fields).every(([k, v]) => rec[k] === v);
+      if (same) return;
+      Object.assign(rec, fields, { deleted: false });
+      touch(next, kind, rec);
+      return;
+    }
     const t = now();
-    const rec = { id: uuid(), createdAt: t, updatedAt: t, deleted: false, ...clean };
-    const next = cloneState(state);
-    next[col(kind)].push(rec);
-    commit(next, [`${kind}_${rec.id}`]);
-    return rec;
+    const created = { id, ...fields, createdAt: t, updatedAt: t, deleted: false };
+    arr.push(created);
+    markDirty(next, kind, id);
   }
 
-  function update(kind, id, patch) {
-    const prev = find(kind, id);
-    if (!prev) fail('Elemento non trovato');
-    const merged = { ...prev, ...patch };
-    const clean = VALIDATORS[kind](merged, prev, state);
-    const rec = { ...prev, ...clean, id: prev.id, createdAt: prev.createdAt, deleted: prev.deleted, updatedAt: stamp(prev) };
-    const next = cloneState(state);
-    const list = next[col(kind)];
-    list[list.findIndex((r) => r.id === id)] = rec;
-    commit(next, [`${kind}_${id}`]);
-    return rec;
-  }
-
-  function setDeleted(kind, id, deleted) {
-    const prev = find(kind, id);
-    if (!prev) fail('Elemento non trovato');
-    if (!deleted) {
-      // Il ripristino deve rispettare le stesse regole (nomi unici, quote restituite).
-      VALIDATORS[kind]({ ...prev }, prev, state);
+  function upsertNote(next, date, studioId, text) {
+    const clean = String(text ?? '').trim();
+    if (clean.length > MAX_NOTE) throw new ValidationError(MSG.note);
+    const id = noteId(date, studioId);
+    if (clean === '') {
+      const n = findLive(next.notes, id);
+      if (n) tombstone(next, 'note', n);
+      return;
     }
-    const rec = { ...prev, deleted, updatedAt: stamp(prev) };
-    const next = cloneState(state);
-    const list = next[col(kind)];
-    list[list.findIndex((r) => r.id === id)] = rec;
-    commit(next, [`${kind}_${id}`]);
-    return rec;
+    upsert(next, 'note', id, { date, studioId, text: clean });
   }
 
-  function confirmOccurrence(schedId, date, overrides = {}) {
-    return confirmMany(schedId, [{ date, overrides }])[0];
-  }
-
-  // Conferma una o più scadenze dello stesso programmato in un solo salvataggio: o tutte o nessuna.
-  function confirmMany(schedId, items) {
-    const s = find('scheduled', schedId);
-    if (!s || s.deleted) fail('Pagamento programmato non trovato');
-    const t = now();
-    const handled = { ...(s.handled || {}) };
-    const movs = items.map(({ date, overrides = {} }) => {
-      const input = {
-        type: s.type, date, amount: s.amount, accountId: s.accountId, toAccountId: s.toAccountId,
-        amountTo: s.amountTo, categoryId: s.categoryId, description: s.description,
-        ...overrides, scheduledId: s.id, occurrence: date,
-      };
-      const clean = VALIDATORS.movement(input, null, state);
-      handled[date] = 'confermato';
-      return { id: uuid(), createdAt: t, updatedAt: t, deleted: false, ...clean };
-    });
-    const next = cloneState(state);
-    next.movements.push(...movs);
-    next.scheduled[next.scheduled.findIndex((r) => r.id === s.id)] = { ...s, handled, updatedAt: stamp(s) };
-    commit(next, [...movs.map((m) => `movement_${m.id}`), `scheduled_${s.id}`]);
-    return movs;
-  }
-
-  function setHandled(schedId, date, value) {
-    const s = find('scheduled', schedId);
-    if (!s) fail('Pagamento programmato non trovato');
-    const handled = { ...(s.handled || {}) };
-    if (value) handled[date] = value; else delete handled[date];
-    const next = cloneState(state);
-    next.scheduled[next.scheduled.findIndex((r) => r.id === s.id)] = { ...s, handled, updatedAt: stamp(s) };
-    commit(next, [`scheduled_${s.id}`]);
-  }
-
-  // Aggiungi/Togli a mano. Con una data valida il movimento entra anche nel mese (log) per la quota mensile.
-  function adjustGoal(id, delta, date = null) {
-    const g = find('goal', id);
-    if (!g || g.deleted) fail('Obiettivo non trovato');
-    if (!Number.isSafeInteger(delta) || delta === 0) fail('Importo non valido', 'amount');
-    if (g.saved + delta < 0) fail('Non puoi togliere più di quanto hai messo da parte', 'amount');
-    const patch = { saved: g.saved + delta };
-    if (isValidISO(date)) {
-      const log = cleanGoalLog(g.log);
-      const ym = monthOf(date);
-      log[ym] = (log[ym] || 0) + delta;
-      patch.log = log;
-    }
-    return update('goal', id, patch);
-  }
-
-  // "Metti da parte" dopo lo stipendio: più obiettivi in un solo salvataggio, tutto o niente.
-  function allocateGoals(items, date) {
-    if (!isValidISO(date)) fail('Data non valida', 'date');
-    if (!Array.isArray(items) || !items.length) fail('Scegli almeno un obiettivo');
-    const ym = monthOf(date);
-    const next = cloneState(state);
-    const keys = [];
-    const out = [];
-    for (const { id, amount } of items) {
-      const i = next.goals.findIndex((g) => g.id === id);
-      const prev = i >= 0 ? next.goals[i] : null;
-      if (!prev || prev.deleted) fail('Obiettivo non trovato', 'alloc-' + id);
-      if (!Number.isSafeInteger(amount) || amount < 1) fail('Importo: deve essere maggiore di zero', 'alloc-' + id);
-      const log = cleanGoalLog(prev.log);
-      log[ym] = (log[ym] || 0) + amount;
-      const rec = { ...prev, saved: prev.saved + amount, log, updatedAt: stamp(prev) };
-      if (!Number.isSafeInteger(rec.saved)) fail('Importo non valido', 'alloc-' + id);
-      next.goals[i] = rec;
-      keys.push(`goal_${id}`);
-      out.push(rec);
-    }
-    commit(next, keys);
-    return out;
-  }
-
-  // Movimenti calcolati dall'app (interessi, rettifiche): id fissi decisi dal chiamante, un solo salvataggio.
-  // records: [{ id, input, deleted }]. Un record da eliminare che esiste viene solo marcato deleted (contenuto invariato);
-  // un record nuovo già eliminato si crea solo se valido (rettifiche con importo 0).
-  // Nessun salvataggio e nessuna notifica se nulla cambia: così chi lo chiama da subscribe non crea cicli.
-  // Categoria con ruolo (Interessi v4, Dividendi v5) con id fisso: creata se manca (nome alternativo se il nome
-  // è già usato da un'altra entrata), ripristinata se eliminata. Restituisce le chiavi toccate.
-  function ensureRoleCategory(next, role) {
-    const def = ROLE_CATEGORIES[role];
-    const i = next.categories.findIndex((c) => c.id === def.id);
-    if (i < 0) {
-      const t = now();
-      const clash = next.categories.some((c) => !c.deleted && c.type === 'entrata' && lower(c.name) === lower(def.name));
-      next.categories.push({
-        id: def.id, createdAt: t, updatedAt: t, deleted: false, name: clash ? def.alt : def.name,
-        type: 'entrata', color: def.color, budget: null, role, order: def.order, icon: null,
-      });
-      return [`category_${def.id}`];
-    }
-    if (next.categories[i].deleted) {
-      next.categories[i] = { ...next.categories[i], deleted: false, updatedAt: stamp(next.categories[i]) };
-      return [`category_${def.id}`];
-    }
-    return [];
-  }
-
-  // Foglio Dividendo (v5): assicura la categoria Dividendi; nessun salvataggio se c'è già.
-  function ensureDividendCategory() {
-    const next = cloneState(state);
-    const keys = ensureRoleCategory(next, 'dividendi');
-    if (keys.length) commit(next, keys);
-    return DIVIDEND_CATEGORY_ID;
-  }
-
-  // "Aggiorna valore" (v5): aggiunge o sostituisce il valore di 1 quota di quella data.
-  function setInvestmentPrice(id, date, price) {
-    const etf = find('investment', id);
-    if (!etf || etf.deleted) fail('ETF non trovato');
-    if (!isValidISO(date)) fail('Data non valida', 'date');
-    if (!Number.isSafeInteger(price) || price < 1) fail('Valore non valido (es. 58,50)', 'price');
-    const prices = [...(etf.prices || []).filter((p) => p.date !== date), { date, price }];
-    return update('investment', id, { prices });
-  }
-
-  // "Aggiorna valore" di un conto crypto (v6): aggiunge o sostituisce il valore di 1 unità di quella data
-  // (centesimi per 1 unità intera, es. 1 BTC = 70.000,00 → 7000000).
-  function setAccountPrice(id, date, price) {
-    const acc = find('account', id);
-    if (!acc || acc.deleted || acc.kind !== 'crypto') fail('Conto crypto non trovato');
-    if (!isValidISO(date)) fail('Data non valida', 'date');
-    if (!Number.isSafeInteger(price) || price < 1) fail('Valore non valido (es. 70.000,00)', 'price');
-    const prices = [...(acc.prices || []).filter((p) => p.date !== date), { date, price }];
-    return update('account', id, { prices });
-  }
-
-  function upsertDerived(records, { ensureCategory = false } = {}) {
-    const next = cloneState(state);
-    const keys = [];
-    const t = now();
-    if (ensureCategory) keys.push(...ensureRoleCategory(next, 'interessi'));
-    for (const { id, input, deleted = false } of records) {
-      const i = next.movements.findIndex((m) => m.id === id);
-      const prev = i >= 0 ? next.movements[i] : null;
-      if (deleted && prev) {
-        if (prev.deleted) continue;
-        next.movements[i] = { ...prev, deleted: true, updatedAt: stamp(prev) };
-        keys.push(`movement_${id}`);
-        continue;
+  function ruleFields(i) {
+    const end = i.end?.type === 'until' ? { type: 'until', date: i.end.date }
+      : i.end?.type === 'count' ? { type: 'count', count: i.end.count } : { type: 'never' };
+    const time = i.time && (i.time.from || i.time.to) ? { from: i.time.from, to: i.time.to } : null;
+    const base = { studioId: i.studioId, type: i.type, start: i.start, end, time };
+    if (i.type === 'weekly') {
+      base.weekdays = Array.isArray(i.weekdays) ? [...new Set(i.weekdays)].sort((a, b) => a - b) : i.weekdays;
+      base.interval = i.interval ?? 1;
+      // orario per giorno della settimana (facoltativo): solo i giorni scelti, senza le righe vuote
+      if (i.dayTimes && typeof i.dayTimes === 'object' && !Array.isArray(i.dayTimes)) {
+        const dt = {};
+        for (const [k, v] of Object.entries(i.dayTimes)) {
+          if (!v || (!v.from && !v.to)) continue;
+          if (Array.isArray(base.weekdays) && !base.weekdays.includes(Number(k))) continue;
+          dt[k] = { from: v.from, to: v.to };
+        }
+        if (Object.keys(dt).length) base.dayTimes = dt;
+      } else if (i.dayTimes !== undefined && i.dayTimes !== null) {
+        base.dayTimes = i.dayTimes; // tipo sbagliato: lo rifiuta ruleError
       }
-      const clean = VALIDATORS.movement(input, prev, next);
-      if (prev) {
-        const same = !prev.deleted && Object.entries(clean).every(([k, v]) => JSON.stringify(prev[k] ?? null) === JSON.stringify(v ?? null));
-        if (same) continue;
-        next.movements[i] = { ...prev, ...clean, deleted: false, updatedAt: stamp(prev) };
-      } else {
-        next.movements.push({ id, createdAt: t, updatedAt: t, deleted, ...clean });
-      }
-      keys.push(`movement_${id}`);
-    }
-    if (!keys.length) return 0;
-    commit(next, keys);
-    return keys.length;
+    } else if (i.type === 'monthly-date') base.monthDay = i.monthDay;
+    else if (i.type === 'monthly-pos') Object.assign(base, { nth: i.nth, weekday: i.weekday });
+    else if (i.type === 'yearly') Object.assign(base, { month: i.month, day: i.day });
+    return base;
   }
 
-  // Più movimenti nuovi in un salvataggio (importazione CSV): o tutti o nessuno.
-  function addMovements(inputs) {
-    const next = cloneState(state);
-    const t = now();
-    const out = inputs.map((input) => {
-      const rec = { id: uuid(), createdAt: t, updatedAt: t, deleted: false, ...VALIDATORS.movement(input || {}, null, next) };
-      next.movements.push(rec);
-      return rec;
-    });
-    if (!out.length) return out;
-    commit(next, out.map((m) => `movement_${m.id}`));
-    return out;
-  }
-
-  // Chiude il conto con una persona su tutte le spese divise aperte, in un salvataggio.
-  // refund: una restituzione per spesa con il residuo della persona; writeoff: la quota scende a quanto ha già
-  // restituito (se non ha restituito nulla la persona esce dall'elenco) e la quota esclusa di conseguenza.
-  function settlePerson(name, { mode, accountId, date } = {}) {
-    const k = lower(name || '');
-    if (!k) fail('Persona non trovata');
-    if (mode !== 'refund' && mode !== 'writeoff') fail('Operazione non valida');
-    const next = cloneState(state);
-    const keys = [];
-    const t = now();
-    for (const exp of state.movements) {
-      if (exp.deleted || exp.type !== 'uscita' || !Array.isArray(exp.split)) continue;
-      const share = exp.split.find((x) => lower(x.person) === k);
-      if (!share) continue;
-      const by = refundedBy(state, exp.id, share.person);
-      const residual = share.amount - by;
-      if (residual <= 0) continue;
-      if (mode === 'refund') {
-        const input = { type: 'restituzione', date, amount: residual, accountId, refundOf: exp.id, person: share.person };
-        const rec = { id: uuid(), createdAt: t, updatedAt: t, deleted: false, ...VALIDATORS.movement(input, null, next) };
-        next.movements.push(rec);
-        keys.push(`movement_${rec.id}`);
-      } else {
-        const split = exp.split.map((x) => (x === share ? { ...x, amount: by } : x)).filter((x) => x.amount > 0);
-        const i = next.movements.findIndex((m) => m.id === exp.id);
-        const clean = VALIDATORS.movement({ ...exp, split, excluded: splitSum(split) }, exp, next);
-        next.movements[i] = { ...exp, ...clean, updatedAt: stamp(exp) };
-        keys.push(`movement_${exp.id}`);
+  // ---------- rimozione trattamento (blocchi interni su bozza) ----------
+  function archiveIn(next, t, ids) {
+    let changed = false;
+    for (const sid of ids) {
+      if (t.studios[sid] === 'active') {
+        t.studios[sid] = 'archived';
+        changed = true;
       }
     }
-    if (!keys.length) fail('Nessuna somma aperta con questa persona');
-    commit(next, keys);
-    return keys.length;
+    if (changed) touch(next, 'treatment', t);
   }
 
-  const allKeys = () => Object.entries(KINDS).flatMap(([kind, c]) => state[c].map((r) => `${kind}_${r.id}`));
-
-  function replaceAll(data) {
-    const norm = normalizeData(data);
-    if (!norm) fail('Dati non validi');
-    commit(norm, null, 'local');
-    corrupted = null;
-  }
-
-  // Applica record arrivati dalla sync: vince updatedAt più recente; non segna nulla come da inviare.
-  function applyRemote(items) {
-    const next = cloneState(state);
-    const keys = [];
-    for (const { kind, record } of items) {
-      const c = KINDS[kind];
-      if (!c || !isObj(record) || typeof record.id !== 'string') continue;
-      const list = next[c];
-      const i = list.findIndex((r) => r.id === record.id);
-      if (i < 0) list.push(record);
-      else if ((record.updatedAt || 0) > (list[i].updatedAt || 0)) list[i] = record;
-      else continue;
-      keys.push(`${kind}_${record.id}`);
+  function removeFrom(next, t, ids) {
+    const set = new Set(ids);
+    for (const e of next.entries) {
+      if (!e.deleted && e.treatmentId === t.id && set.has(e.studioId)) tombstone(next, 'entry', e);
     }
-    if (keys.length) commit(next, keys, 'remote');
-    return keys.length;
+    let changed = false;
+    for (const sid of ids) {
+      if (sid in t.studios) {
+        delete t.studios[sid];
+        changed = true;
+      }
+    }
+    if (Object.keys(t.studios).length === 0) tombstone(next, 'treatment', t);
+    else if (changed) touch(next, 'treatment', t);
   }
 
-  function recordByKey(k) {
-    const i = k.indexOf('_');
-    const kind = k.slice(0, i);
-    if (!KINDS[kind]) return null;
-    return find(kind, k.slice(i + 1));
-  }
-
-  function reload() {
-    load();
-    notify(null, 'external');
+  function getTreatmentDraft(next, id) {
+    const t = findLive(next.treatments, id);
+    if (!t) throw new ValidationError(MSG.treatmentNotFound);
+    return t;
   }
 
   load();
 
   const api = {
-    getState: () => state,
-    get corrupted() { return corrupted; },
-    subscribe(fn) { listeners.add(fn); return () => listeners.delete(fn); },
-    find, add, update, allKeys, recordByKey, replaceAll, applyRemote, reload,
-    remove: (kind, id) => setDeleted(kind, id, true),
-    restore: (kind, id) => setDeleted(kind, id, false),
-    confirmOccurrence,
-    confirmAll: (id, dates) => confirmMany(id, dates.map((date) => ({ date }))),
-    skipOccurrence: (id, date) => setHandled(id, date, 'saltato'),
-    unhandleOccurrence: (id, date) => setHandled(id, date, null),
-    adjustGoal, allocateGoals, upsertDerived, addMovements, settlePerson, ensureDividendCategory, setInvestmentPrice, setAccountPrice,
+    get loadWarning() {
+      return loadWarning;
+    },
+    isReadOnly: () => readOnly,
+
+    subscribe(fn) {
+      subscribers.add(fn);
+      return () => subscribers.delete(fn);
+    },
+
+    // ---------- query ----------
+    getStudios({ includeArchived = false } = {}) {
+      return live(state.studios).filter((s) => includeArchived || !s.archived).sort(byName).map(copyRec);
+    },
+    getTreatments() {
+      return live(state.treatments).sort(byName).map(copyRec);
+    },
+    getTreatmentsForStudio(studioId, { includeArchived = false } = {}) {
+      return live(state.treatments)
+        .filter((t) => t.studios[studioId] === 'active' || (includeArchived && t.studios[studioId] === 'archived'))
+        .sort(byName).map(copyRec);
+    },
+    getEntries({ from, to, studioId, treatmentId } = {}) {
+      return live(state.entries)
+        .filter((e) => (!from || e.date >= from) && (!to || e.date <= to)
+          && (!studioId || e.studioId === studioId) && (!treatmentId || e.treatmentId === treatmentId))
+        .sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : b.createdAt - a.createdAt))
+        .map(copyRec);
+    },
+    countEntries({ studioId, treatmentId } = {}) {
+      let n = 0;
+      for (const e of state.entries) {
+        if (!e.deleted && (!studioId || e.studioId === studioId) && (!treatmentId || e.treatmentId === treatmentId)) n++;
+      }
+      return n;
+    },
+    studioDeleteImpact(id) {
+      const entryCount = api.countEntries({ studioId: id });
+      const orphanTreatmentNames = live(state.treatments)
+        .filter((t) => { const k = Object.keys(t.studios); return k.length === 1 && k[0] === id; })
+        .sort(byName).map((t) => t.name);
+      return { entryCount, orphanTreatmentNames };
+    },
+
+    // ---------- studi ----------
+    addStudio(name) {
+      const n = cleanName(name);
+      return mutate((next) => {
+        checkUnique(next.studios, n, null, MSG.dupStudio);
+        const t = now();
+        const rec = {
+          id: uuid(), name: n, archived: false, color: nextStudioColor(live(next.studios)), createdAt: t, updatedAt: t, deleted: false,
+        };
+        next.studios.push(rec);
+        markDirty(next, 'studio', rec.id);
+        return rec.id;
+      });
+    },
+    renameStudio(id, name) {
+      const n = cleanName(name);
+      mutate((next) => {
+        const s = findLive(next.studios, id);
+        if (!s) throw new ValidationError(MSG.studioNotFound);
+        checkUnique(next.studios, n, id, MSG.dupStudio);
+        s.name = n;
+        touch(next, 'studio', s);
+      });
+    },
+    archiveStudio(id) {
+      mutate((next) => {
+        const s = findLive(next.studios, id);
+        if (!s) throw new ValidationError(MSG.studioNotFound);
+        s.archived = true;
+        touch(next, 'studio', s);
+      });
+    },
+    restoreStudio(id) {
+      mutate((next) => {
+        const s = findLive(next.studios, id);
+        if (!s) throw new ValidationError(MSG.studioNotFound);
+        s.archived = false;
+        touch(next, 'studio', s);
+      });
+    },
+    deleteStudio(id) {
+      mutate((next) => {
+        const s = findLive(next.studios, id);
+        if (!s) throw new ValidationError(MSG.studioNotFound);
+        tombstone(next, 'studio', s);
+        for (const e of next.entries) if (!e.deleted && e.studioId === id) tombstone(next, 'entry', e);
+        for (const [kind, arr] of [['rule', 'rules'], ['day', 'days'], ['note', 'notes'], ['payment', 'payments']]) {
+          for (const r of next[arr]) if (!r.deleted && r.studioId === id) tombstone(next, kind, r);
+        }
+        for (const t of next.treatments) {
+          if (t.deleted || !(id in t.studios)) continue;
+          delete t.studios[id];
+          if (Object.keys(t.studios).length === 0) tombstone(next, 'treatment', t);
+          else touch(next, 'treatment', t);
+        }
+      });
+    },
+
+    // ---------- trattamenti ----------
+    addTreatment(name, studioIds) {
+      const n = cleanName(name);
+      requireIds(studioIds);
+      return mutate((next) => {
+        checkUnique(next.treatments, n, null, MSG.dupTreatment);
+        const studios = {};
+        for (const sid of studioIds) {
+          if (!findLive(next.studios, sid)) throw new ValidationError(MSG.studioNotFound);
+          studios[sid] = 'active';
+        }
+        const t = now();
+        const rec = { id: uuid(), name: n, studios, createdAt: t, updatedAt: t, deleted: false };
+        next.treatments.push(rec);
+        markDirty(next, 'treatment', rec.id);
+        return rec.id;
+      });
+    },
+    renameTreatment(id, name) {
+      const n = cleanName(name);
+      mutate((next) => {
+        const t = getTreatmentDraft(next, id);
+        checkUnique(next.treatments, n, id, MSG.dupTreatment);
+        t.name = n;
+        touch(next, 'treatment', t);
+      });
+    },
+    addTreatmentToStudios(id, studioIds) {
+      requireIds(studioIds);
+      mutate((next) => {
+        const t = getTreatmentDraft(next, id);
+        for (const sid of studioIds) {
+          if (!findLive(next.studios, sid)) throw new ValidationError(MSG.studioNotFound);
+          t.studios[sid] = 'active';
+        }
+        touch(next, 'treatment', t);
+      });
+    },
+    archiveTreatmentInStudios(id, studioIds) {
+      requireIds(studioIds);
+      mutate((next) => archiveIn(next, getTreatmentDraft(next, id), studioIds));
+    },
+    restoreTreatmentInStudios(id, studioIds) {
+      requireIds(studioIds);
+      mutate((next) => {
+        const t = getTreatmentDraft(next, id);
+        let changed = false;
+        for (const sid of studioIds) {
+          if (t.studios[sid] === 'archived') {
+            t.studios[sid] = 'active';
+            changed = true;
+          }
+        }
+        if (changed) touch(next, 'treatment', t);
+      });
+    },
+    removeTreatmentFromStudios(id, studioIds) {
+      requireIds(studioIds);
+      mutate((next) => removeFrom(next, getTreatmentDraft(next, id), studioIds));
+    },
+    applyTreatmentRemoval(id, { archiveIds = [], removeIds = [] } = {}) {
+      if (archiveIds.length === 0 && removeIds.length === 0) throw new ValidationError(MSG.noStudios);
+      mutate((next) => {
+        const t = getTreatmentDraft(next, id);
+        if (archiveIds.length) archiveIn(next, t, archiveIds);
+        if (removeIds.length) removeFrom(next, t, removeIds);
+      });
+    },
+
+    // ---------- inserimenti ----------
+    addEntries(list) {
+      if (!Array.isArray(list) || list.length === 0) throw new ValidationError(MSG.noEntries);
+      return mutate((next) => {
+        const recs = list.map((input) => {
+          const e = {
+            date: input.date, studioId: input.studioId, treatmentId: input.treatmentId,
+            patients: input.patients, amountCents: input.amountCents,
+          };
+          const err = entryFieldsError(e);
+          if (err) throw new ValidationError(err);
+          const s = findLive(next.studios, e.studioId);
+          if (!s || s.archived) throw new ValidationError(MSG.studioUnavailable);
+          const t = findLive(next.treatments, e.treatmentId);
+          if (!t || t.studios[e.studioId] !== 'active') throw new ValidationError(MSG.treatmentInactive);
+          return e;
+        });
+        const t = now();
+        const ids = [];
+        for (const e of recs) {
+          const rec = { id: uuid(), ...e, createdAt: t, updatedAt: t, deleted: false };
+          next.entries.push(rec);
+          markDirty(next, 'entry', rec.id);
+          ids.push(rec.id);
+        }
+        return ids;
+      });
+    },
+    updateEntry(id, patch) {
+      mutate((next) => {
+        const e = findLive(next.entries, id);
+        if (!e) throw new ValidationError(MSG.entryNotFound);
+        const merged = { ...e };
+        for (const f of ['date', 'studioId', 'treatmentId', 'patients', 'amountCents']) {
+          if (patch && patch[f] !== undefined) merged[f] = patch[f];
+        }
+        const err = entryFieldsError(merged);
+        if (err) throw new ValidationError(err);
+        if (!findLive(next.studios, merged.studioId)) throw new ValidationError(MSG.studioNotFound);
+        const t = findLive(next.treatments, merged.treatmentId);
+        if (!t) throw new ValidationError(MSG.treatmentNotFound);
+        if (!(merged.studioId in t.studios)) throw new ValidationError(MSG.notAssociated);
+        Object.assign(e, merged);
+        touch(next, 'entry', e);
+      });
+    },
+    /** Elimina un inserimento; ritorna la copia per "Annulla" ([{kind, data}]). */
+    deleteEntry(id) {
+      return mutate((next) => {
+        const e = findLive(next.entries, id);
+        if (!e) throw new ValidationError(MSG.entryNotFound);
+        const copy = copyRec(e);
+        tombstone(next, 'entry', e);
+        return [{ kind: 'entry', data: copy }];
+      });
+    },
+
+    /**
+     * Salva una giornata (data + studio) in un'unica operazione.
+     * rows: [{id?, treatmentId, patients, amountCents}] (con id = modifica, senza = nuova riga);
+     * deleteIds: inserimenti da eliminare; note: testo della nota ('' = elimina, undefined = invariata).
+     */
+    saveDay({ date, studioId, rows = [], deleteIds = [], note } = {}) {
+      if (!isValidISODate(date)) throw new ValidationError(MSG.date);
+      return mutate((next) => {
+        const s = findLive(next.studios, studioId);
+        if (!s) throw new ValidationError(MSG.studioNotFound);
+        const t0 = now();
+        const res = { added: [], updated: 0, deleted: 0 };
+        for (const row of rows) {
+          const fields = { date, patients: row.patients, amountCents: row.amountCents };
+          const err = entryFieldsError(fields);
+          if (err) throw new ValidationError(err);
+          if (row.id) {
+            const e = findLive(next.entries, row.id);
+            if (!e || e.date !== date || e.studioId !== studioId) throw new ValidationError(MSG.entryNotFound);
+            if (e.patients === row.patients && e.amountCents === row.amountCents) continue;
+            e.patients = row.patients;
+            e.amountCents = row.amountCents;
+            touch(next, 'entry', e);
+            res.updated += 1;
+          } else {
+            if (s.archived) throw new ValidationError(MSG.studioUnavailable);
+            const t = findLive(next.treatments, row.treatmentId);
+            if (!t || t.studios[studioId] !== 'active') throw new ValidationError(MSG.treatmentInactive);
+            const rec = {
+              id: uuid(), date, studioId, treatmentId: row.treatmentId, patients: row.patients, amountCents: row.amountCents,
+              createdAt: t0, updatedAt: t0, deleted: false,
+            };
+            next.entries.push(rec);
+            markDirty(next, 'entry', rec.id);
+            res.added.push(rec.id);
+          }
+        }
+        for (const id of deleteIds) {
+          const e = findLive(next.entries, id);
+          if (!e || e.date !== date || e.studioId !== studioId) throw new ValidationError(MSG.entryNotFound);
+          tombstone(next, 'entry', e);
+          res.deleted += 1;
+        }
+        if (note !== undefined) upsertNote(next, date, studioId, note);
+        return res;
+      });
+    },
+
+    /** Elimina tutti gli inserimenti (e la nota) di una giornata; ritorna le copie per "Annulla". */
+    deleteDayEntries(date, studioId) {
+      return mutate((next) => {
+        const removed = [];
+        for (const e of next.entries) {
+          if (e.deleted || e.date !== date || e.studioId !== studioId) continue;
+          removed.push({ kind: 'entry', data: copyRec(e) });
+          tombstone(next, 'entry', e);
+        }
+        const n = findLive(next.notes, noteId(date, studioId));
+        if (n) {
+          removed.push({ kind: 'note', data: copyRec(n) });
+          tombstone(next, 'note', n);
+        }
+        if (removed.length === 0) throw new ValidationError(MSG.noDay);
+        return removed;
+      });
+    },
+
+    /**
+     * Sposta una giornata (tutte le righe e la nota) su un'altra data e/o un altro studio.
+     * note (facoltativa): nuovo testo della nota ('' = elimina), salvato nella stessa operazione:
+     * se lo spostamento non è possibile non cambia niente.
+     */
+    moveDayEntries(src, dst, { note } = {}) {
+      if (!isValidISODate(dst?.date)) throw new ValidationError(MSG.date);
+      const same = src.date === dst.date && src.studioId === dst.studioId;
+      if (same && note === undefined) return 0;
+      return mutate((next) => {
+        if (note !== undefined) {
+          if (!findLive(next.studios, src.studioId)) throw new ValidationError(MSG.studioNotFound);
+          upsertNote(next, src.date, src.studioId, note);
+        }
+        if (same) return 0;
+        if (!findLive(next.studios, dst.studioId)) throw new ValidationError(MSG.studioNotFound);
+        const list = next.entries.filter((e) => !e.deleted && e.date === src.date && e.studioId === src.studioId);
+        const srcNote = findLive(next.notes, noteId(src.date, src.studioId));
+        if (list.length === 0 && !srcNote) {
+          if (note !== undefined) return 0; // la nota appena tolta era tutto: niente da spostare
+          throw new ValidationError(MSG.noDay);
+        }
+        for (const e of list) {
+          const t = findLive(next.treatments, e.treatmentId);
+          if (!t) throw new ValidationError(MSG.treatmentNotFound);
+          if (!(dst.studioId in t.studios)) throw new ValidationError(MSG.notAssociatedTarget(t.name));
+        }
+        for (const e of list) {
+          e.date = dst.date;
+          e.studioId = dst.studioId;
+          touch(next, 'entry', e);
+        }
+        if (srcNote) {
+          const target = findLive(next.notes, noteId(dst.date, dst.studioId));
+          const text = target ? `${target.text}\n${srcNote.text}`.slice(0, MAX_NOTE) : srcNote.text;
+          tombstone(next, 'note', srcNote);
+          upsertNote(next, dst.date, dst.studioId, text);
+        }
+        return list.length;
+      });
+    },
+
+    /** Ripristina record eliminati (da "Annulla"); salta quelli già presenti o senza studio/trattamento. */
+    restoreRecords(list) {
+      return mutate((next) => {
+        let n = 0;
+        for (const item of list || []) {
+          const arr = ARRAY_OF[item?.kind] && next[ARRAY_OF[item.kind]];
+          if (!arr || !isObj(item.data)) continue;
+          const data = item.data;
+          if (findLive(arr, data.id)) continue;
+          if (data.studioId && !findLive(next.studios, data.studioId)) continue;
+          if (item.kind === 'entry' && !findLive(next.treatments, data.treatmentId)) continue;
+          const rec = { ...copyRec(data), deleted: false };
+          const idx = arr.findIndex((r) => r.id === data.id);
+          if (idx >= 0) {
+            rec.updatedAt = arr[idx].updatedAt;
+            arr[idx] = rec;
+          } else {
+            arr.push(rec);
+          }
+          touch(next, item.kind, rec);
+          n += 1;
+        }
+        return n;
+      });
+    },
+
+    // ---------- colore dello studio ----------
+    /** Studi della versione 1 senza colore: colori diversi in ordine di creazione (una sola volta). */
+    assignMissingColors() {
+      const missing = live(state.studios).filter((s) => !COLOR_KEYS.includes(s.color));
+      if (missing.length === 0 || readOnly) return 0;
+      return mutate((next) => {
+        const studios = live(next.studios).sort((a, b) => a.createdAt - b.createdAt || (a.id < b.id ? -1 : 1));
+        let n = 0;
+        for (const s of studios) {
+          if (COLOR_KEYS.includes(s.color)) continue;
+          s.color = nextStudioColor(studios.filter((x) => COLOR_KEYS.includes(x.color)));
+          touch(next, 'studio', s);
+          n += 1;
+        }
+        return n;
+      });
+    },
+    setStudioColor(id, color) {
+      if (!COLOR_KEYS.includes(color)) throw new ValidationError(MSG.color);
+      mutate((next) => {
+        const s = findLive(next.studios, id);
+        if (!s) throw new ValidationError(MSG.studioNotFound);
+        s.color = color;
+        touch(next, 'studio', s);
+      });
+    },
+
+    // ---------- calendario di lavoro ----------
+    getCalendar() {
+      return {
+        rules: live(state.rules).map(copyRec),
+        days: live(state.days).sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0)).map(copyRec),
+      };
+    },
+    addRule(input) {
+      const fields = ruleFields(input);
+      const err = ruleError(fields);
+      if (err) throw new ValidationError(err);
+      return mutate((next) => {
+        const s = findLive(next.studios, fields.studioId);
+        if (!s || s.archived) throw new ValidationError(MSG.studioUnavailable);
+        const t = now();
+        const rec = { id: uuid(), ...fields, exdates: [], createdAt: t, updatedAt: t, deleted: false };
+        next.rules.push(rec);
+        markDirty(next, 'rule', rec.id);
+        return rec.id;
+      });
+    },
+    updateRule(id, input) {
+      mutate((next) => {
+        const idx = next.rules.findIndex((r) => r.id === id && !r.deleted);
+        if (idx < 0) throw new ValidationError(MSG.ruleNotFound);
+        const old = next.rules[idx];
+        const fields = ruleFields({ ...old, ...input });
+        const rec = {
+          id: old.id, ...fields, exdates: [...(input.exdates ?? old.exdates ?? [])].sort(),
+          createdAt: old.createdAt, updatedAt: old.updatedAt, deleted: false,
+        };
+        const err = ruleError(rec);
+        if (err) throw new ValidationError(err);
+        if (!findLive(next.studios, rec.studioId)) throw new ValidationError(MSG.studioNotFound);
+        next.rules[idx] = rec;
+        touch(next, 'rule', rec);
+      });
+    },
+    deleteRule(id) {
+      mutate((next) => {
+        const r = findLive(next.rules, id);
+        if (!r) throw new ValidationError(MSG.ruleNotFound);
+        tombstone(next, 'rule', r);
+      });
+    },
+    /** Aggiunge giorni singoli per uno studio (salta quelli già presenti). Ritorna gli id creati. */
+    addWorkDays(studioId, dates, time = null) {
+      const list = [...new Set(dates || [])].sort();
+      if (list.length === 0) throw new ValidationError(MSG.date);
+      for (const date of list) {
+        const err = dayError({ studioId, date, time });
+        if (err) throw new ValidationError(err);
+      }
+      return mutate((next) => {
+        const s = findLive(next.studios, studioId);
+        if (!s || s.archived) throw new ValidationError(MSG.studioUnavailable);
+        const t = now();
+        const ids = [];
+        for (const date of list) {
+          if (next.days.some((d) => !d.deleted && d.studioId === studioId && d.date === date)) continue;
+          const rec = { id: uuid(), studioId, date, time: time || null, createdAt: t, updatedAt: t, deleted: false };
+          next.days.push(rec);
+          markDirty(next, 'day', rec.id);
+          ids.push(rec.id);
+        }
+        return ids;
+      });
+    },
+    updateWorkDay(id, patch) {
+      mutate((next) => {
+        const d = findLive(next.days, id);
+        if (!d) throw new ValidationError(MSG.dayNotFound);
+        const merged = { ...d, ...pick(patch, ['studioId', 'date', 'time']) };
+        const err = dayError(merged);
+        if (err) throw new ValidationError(err);
+        const s = findLive(next.studios, merged.studioId);
+        if (!s) throw new ValidationError(MSG.studioNotFound);
+        // come addWorkDays: niente giorni nuovi per uno studio archiviato (resta modificabile solo l'orario)
+        const moved = merged.studioId !== d.studioId || merged.date !== d.date;
+        if (s.archived && moved) throw new ValidationError(MSG.studioUnavailable);
+        if (moved && next.days.some((x) => !x.deleted && x.id !== d.id && x.studioId === merged.studioId && x.date === merged.date)) {
+          throw new ValidationError(MSG.dayDuplicate);
+        }
+        Object.assign(d, merged);
+        touch(next, 'day', d);
+      });
+    },
+    removeWorkDay(id) {
+      mutate((next) => {
+        const d = findLive(next.days, id);
+        if (!d) throw new ValidationError(MSG.dayNotFound);
+        tombstone(next, 'day', d);
+      });
+    },
+    /** Toglie dal calendario un giorno per uno studio: data esclusa nelle regole, giorni singoli eliminati. */
+    unscheduleDay(date, studioId) {
+      if (!isValidISODate(date)) throw new ValidationError(MSG.date);
+      return mutate((next) => {
+        let n = 0;
+        for (const r of next.rules) {
+          if (r.deleted || r.studioId !== studioId || occurrences(r, date, date).length === 0) continue;
+          r.exdates = [...new Set([...(r.exdates || []), date])].sort();
+          touch(next, 'rule', r);
+          n += 1;
+        }
+        for (const d of next.days) {
+          if (d.deleted || d.studioId !== studioId || d.date !== date) continue;
+          tombstone(next, 'day', d);
+          n += 1;
+        }
+        return n;
+      });
+    },
+
+    // ---------- note delle giornate ----------
+    getNote(date, studioId) {
+      const n = findLive(state.notes, noteId(date, studioId));
+      return n ? n.text : null;
+    },
+    getNotes({ from, to, studioId } = {}) {
+      return live(state.notes)
+        .filter((n) => (!from || n.date >= from) && (!to || n.date <= to) && (!studioId || n.studioId === studioId))
+        .map(copyRec);
+    },
+    setNote(date, studioId, text) {
+      if (!isValidISODate(date)) throw new ValidationError(MSG.date);
+      mutate((next) => {
+        if (!findLive(next.studios, studioId)) throw new ValidationError(MSG.studioNotFound);
+        upsertNote(next, date, studioId, text);
+      });
+    },
+
+    // ---------- note da ricordare (Altro → Note) ----------
+    /** Note, la più recente (per ultima modifica) in alto. */
+    getMemos() {
+      return live(state.memos).sort((a, b) => b.updatedAt - a.updatedAt).map(copyRec);
+    },
+    addMemo(text) {
+      const clean = String(text ?? '').trim();
+      if (!clean || clean.length > MAX_MEMO) throw new ValidationError(MSG.memo);
+      return mutate((next) => {
+        const t = now();
+        const rec = { id: uuid(), text: clean, createdAt: t, updatedAt: t, deleted: false };
+        next.memos.push(rec);
+        markDirty(next, 'memo', rec.id);
+        return rec.id;
+      });
+    },
+    updateMemo(id, text) {
+      const clean = String(text ?? '').trim();
+      if (!clean || clean.length > MAX_MEMO) throw new ValidationError(MSG.memo);
+      mutate((next) => {
+        const r = findLive(next.memos, id);
+        if (!r) throw new ValidationError(MSG.memoNotFound);
+        if (r.text === clean) return;
+        r.text = clean;
+        touch(next, 'memo', r);
+      });
+    },
+    deleteMemo(id) {
+      return mutate((next) => {
+        const r = findLive(next.memos, id);
+        if (!r) throw new ValidationError(MSG.memoNotFound);
+        const copy = copyRec(r);
+        tombstone(next, 'memo', r);
+        return [{ kind: 'memo', data: copy }];
+      });
+    },
+
+    // ---------- impostazioni dell'account (si sincronizzano e vanno nel backup) ----------
+    /** Valore dell'impostazione (copia) o null. */
+    getSetting(id) {
+      const r = findLive(state.settings, id);
+      return r ? structuredClone(r.value) : null;
+    },
+    setSetting(id, value) {
+      if (!SETTING_IDS.includes(id)) throw new ValidationError('Impostazione sconosciuta');
+      if (!isObj(value)) throw new ValidationError('Valore dell\'impostazione non valido');
+      mutate((next) => {
+        const r = findLive(next.settings, id);
+        if (r && JSON.stringify(r.value) === JSON.stringify(value)) return;
+        upsert(next, 'setting', id, { value: structuredClone(value) });
+      });
+    },
+
+    // ---------- incassi (pagato / da incassare) per mese e studio ----------
+    getPayments() {
+      return live(state.payments).map(copyRec);
+    },
+    /**
+     * list: [{month:'YYYY-MM', studioId, paid, bollo?, excludedCents?}]; bollo = marca da bollo pagata dallo studio
+     * (conta solo se pagato); excludedCents = parte del mese da non contare nelle tasse (undefined = invariata).
+     */
+    setPaid(list) {
+      for (const p of list || []) {
+        if (typeof p?.month !== 'string' || !MONTH_RE.test(p.month)) throw new ValidationError(MSG.month);
+      }
+      mutate((next) => {
+        for (const p of list || []) {
+          if (!findLive(next.studios, p.studioId)) throw new ValidationError(MSG.studioNotFound);
+          const fields = { month: p.month, studioId: p.studioId, paid: p.paid === true, bollo: p.paid === true && p.bollo === true };
+          if (p.excludedCents !== undefined) {
+            if (!Number.isInteger(p.excludedCents) || p.excludedCents < 0 || p.excludedCents > MAX_CENTS) throw new ValidationError(MSG.amount);
+            fields.excludedCents = p.excludedCents;
+          }
+          upsert(next, 'payment', paymentId(p.month, p.studioId), fields);
+        }
+      });
+    },
+
+    /** Momento dell'ultima modifica nota (ms), o 0. */
+    lastChangeAt() {
+      let max = 0;
+      for (const arr of Object.values(ARRAY_OF)) for (const r of state[arr]) if (r.updatedAt > max) max = r.updatedAt;
+      return max;
+    },
+
+    // ---------- backup e sincronizzazione ----------
+    exportData() {
+      return {
+        studios: live(state.studios).map(copyRec),
+        treatments: live(state.treatments).map(copyRec),
+        entries: live(state.entries).map(copyRec),
+        calendar: { rules: live(state.rules).map(copyRec), days: live(state.days).map(copyRec) },
+        notes: live(state.notes).map(copyRec),
+        payments: live(state.payments).map(copyRec),
+        settings: live(state.settings).map(copyRec),
+        memos: live(state.memos).map(copyRec),
+      };
+    },
+    /**
+     * Sostituisce i dati con quelli di un backup. Le sezioni facoltative assenti
+     * (calendar, notes, payments: backup della versione 1) lasciano invariati i dati attuali.
+     */
+    replaceAll(data) {
+      const next = structuredClone(state);
+      const incoming = {
+        studios: structuredClone(data.studios || []),
+        treatments: structuredClone(data.treatments || []),
+        entries: structuredClone(data.entries || []),
+      };
+      if (isObj(data.calendar)) {
+        incoming.rules = structuredClone(data.calendar.rules || []);
+        incoming.days = structuredClone(data.calendar.days || []);
+      }
+      if (Array.isArray(data.notes)) incoming.notes = structuredClone(data.notes);
+      if (Array.isArray(data.payments)) incoming.payments = structuredClone(data.payments);
+      if (Array.isArray(data.settings)) incoming.settings = structuredClone(data.settings);
+      if (Array.isArray(data.memos)) incoming.memos = structuredClone(data.memos);
+      if (!next.tracking.enabled) {
+        for (const arr of Object.keys(incoming)) next[arr] = incoming[arr];
+        next.tracking = { enabled: false, dirty: [] };
+      } else {
+        for (const kind of KINDS) {
+          const arr = ARRAY_OF[kind];
+          if (!incoming[arr]) continue;
+          const current = new Map(next[arr].map((r) => [r.id, r]));
+          const incomingIds = new Set(incoming[arr].map((r) => r.id));
+          const result = [];
+          for (const r of next[arr]) {
+            if (incomingIds.has(r.id)) continue;
+            if (!r.deleted) tombstone(next, kind, r);
+            result.push(r);
+          }
+          for (const r of incoming[arr]) {
+            const old = current.get(r.id);
+            r.deleted = false;
+            r.updatedAt = Math.max(now(), old ? old.updatedAt + 1 : 0);
+            markDirty(next, kind, r.id);
+            result.push(r);
+          }
+          next[arr] = result;
+        }
+      }
+      commit(next, { allowReadOnly: true, emit: false });
+      readOnly = false;
+      loadWarning = null;
+      notify('local');
+    },
+    getAllRecordsIncludingDeleted() {
+      const out = [];
+      for (const kind of KINDS) {
+        for (const r of state[ARRAY_OF[kind]]) {
+          out.push({ key: keyOf(kind, r.id), kind, data: copyRec(r), updatedAt: r.updatedAt, deleted: !!r.deleted });
+        }
+      }
+      return out;
+    },
+    getRecordsByKeys(keys) {
+      const out = [];
+      for (const key of keys) {
+        const [kind, id] = splitKey(key);
+        if (!ARRAY_OF[kind]) continue;
+        const r = state[ARRAY_OF[kind]].find((x) => x.id === id);
+        if (r) out.push({ key, kind, data: copyRec(r), updatedAt: r.updatedAt, deleted: !!r.deleted });
+      }
+      return out;
+    },
+    applyRemote(records) {
+      if (readOnly) throw new StorageError(MSG.readOnly);
+      const next = structuredClone(state);
+      let taken = 0;
+      for (const rec of records || []) {
+        if (!rec || !ARRAY_OF[rec.kind] || !isObj(rec.data)) continue;
+        const { kind } = rec;
+        const id = rec.data.id;
+        if (typeof id !== 'string' || id === '' || !isTs(rec.updatedAt)) continue;
+        const candidate = { ...rec.data, id, updatedAt: rec.updatedAt, deleted: rec.deleted === true };
+        if (!candidate.deleted && validateRecord(kind, candidate) !== null) continue;
+        const arr = next[ARRAY_OF[kind]];
+        const idx = arr.findIndex((r) => r.id === id);
+        if (idx >= 0 && !(rec.updatedAt > arr[idx].updatedAt)) continue;
+        if (idx >= 0) arr[idx] = candidate;
+        else arr.push(candidate);
+        const k = keyOf(kind, id);
+        next.tracking.dirty = next.tracking.dirty.filter((d) => d !== k);
+        taken++;
+      }
+      if (taken > 0) commit(next, { source: 'remote' });
+      return taken;
+    },
+    isTracking: () => state.tracking.enabled,
+    setTracking(enabled) {
+      const on = enabled === true;
+      if (state.tracking.enabled === on) {
+        if (on) return;
+        const hasTomb = Object.values(ARRAY_OF).some((arr) => state[arr].some((r) => r.deleted));
+        if (state.tracking.dirty.length === 0 && !hasTomb) return;
+      }
+      mutate((next) => {
+        next.tracking.enabled = on;
+        if (!on) next.tracking.dirty = [];
+      }, { emit: false });
+    },
+    markAllDirty() {
+      mutate((next) => {
+        const set = new Set(next.tracking.dirty);
+        for (const kind of KINDS) for (const r of next[ARRAY_OF[kind]]) set.add(keyOf(kind, r.id));
+        next.tracking.dirty = [...set];
+      }, { emit: false });
+    },
+    getDirtyIds: () => [...state.tracking.dirty],
+    clearDirty(list) {
+      const remove = new Set();
+      for (const { key, updatedAt } of list || []) {
+        const [kind, id] = splitKey(key);
+        const arr = ARRAY_OF[kind] ? state[ARRAY_OF[kind]] : null;
+        const r = arr && arr.find((x) => x.id === id);
+        if (!r || r.updatedAt === updatedAt) remove.add(key);
+      }
+      if (remove.size === 0 || !state.tracking.dirty.some((k) => remove.has(k))) return;
+      mutate((next) => {
+        next.tracking.dirty = next.tracking.dirty.filter((k) => !remove.has(k));
+      }, { emit: false });
+    },
+    compactTombstones({ olderThanMs }) {
+      const limit = now() - olderThanMs;
+      const dirty = new Set(state.tracking.dirty);
+      const drop = (kind, r) => r.deleted && !dirty.has(keyOf(kind, r.id)) && r.updatedAt < limit;
+      const any = KINDS.some((kind) => state[ARRAY_OF[kind]].some((r) => drop(kind, r)));
+      if (!any) return;
+      mutate((next) => {
+        for (const kind of KINDS) next[ARRAY_OF[kind]] = next[ARRAY_OF[kind]].filter((r) => !drop(kind, r));
+      }, { emit: false });
+    },
+    reloadFromStorage() {
+      load();
+      notify('remote');
+    },
   };
-  for (const kind of ['Account', 'Category', 'Movement', 'Scheduled', 'Goal', 'Investment']) {
-    const k = kind.toLowerCase();
-    api['add' + kind] = (input) => add(k, input);
-    api['update' + kind] = (id, patch) => update(k, id, patch);
-    api['delete' + kind] = (id) => setDeleted(k, id, true);
-    api['restore' + kind] = (id) => setDeleted(k, id, false);
-  }
   return api;
 }
